@@ -1330,19 +1330,60 @@ public partial class MainWindow : Window
         UpdateBatchRuleButtons();
     }
 
-    private void BatchDelete_Click(object sender, RoutedEventArgs e)
+    private void BatchDelete_Click(object sender, RoutedEventArgs e) => DeleteSelectedRulesWithConfirmation();
+
+    private void DeleteSelectedRulesWithConfirmation()
     {
         var rules = GetSelectedRules();
         if (rules.Count == 0) return;
         if (MessageBox.Show(string.Format(Strings.RulesBatchDeleteConfirmFormat, rules.Count), Strings.DialogConfirmTitle,
-            MessageBoxButton.YesNo, MessageBoxImage.Question) == MessageBoxResult.Yes)
+            MessageBoxButton.YesNo, MessageBoxImage.Question) != MessageBoxResult.Yes) return;
+        var removed = _service.RemoveRules(rules.Select(rule => rule.Id).ToList());
+        if (removed > 0)
+            ShowBatchFeedback(string.Format(Strings.BatchOperationDoneFormat, Strings.RulesBatchDelete, removed));
+        LoadRules();
+        UpdateBatchRuleButtons();
+    }
+
+    // 键盘交互：Delete 删除选中规则（走批量删除同一确认流程）。
+    private void RulesList_KeyDown(object sender, KeyEventArgs e)
+    {
+        if (e.Key != Key.Delete) return;
+        DeleteSelectedRulesWithConfirmation();
+        e.Handled = true;
+    }
+
+    // 双击规则行打开条件编辑器，与右键菜单第一项同一入口。
+    private void RulesList_DoubleClick(object sender, MouseButtonEventArgs e)
+    {
+        if (GetSelectedRule() != null)
+            EditRuleConstraints_Click(sender, e);
+    }
+
+    // Ctrl+F 在规则页聚焦搜索框；Esc 在搜索框内清空并交还列表焦点。
+    private void Window_PreviewKeyDown(object sender, KeyEventArgs e)
+    {
+        if (e.Key == Key.F && Keyboard.Modifiers == ModifierKeys.Control &&
+            PageRules.Visibility == Visibility.Visible && PageRules.Opacity > 0.99)
         {
-            var removed = _service.RemoveRules(rules.Select(rule => rule.Id).ToList());
-            if (removed > 0)
-                ShowBatchFeedback(string.Format(Strings.BatchOperationDoneFormat, Strings.RulesBatchDelete, removed));
-            LoadRules();
-            UpdateBatchRuleButtons();
+            SearchBox.Focus();
+            SearchBox.SelectAll();
+            e.Handled = true;
         }
+    }
+
+    private void SearchBox_KeyDown(object sender, KeyEventArgs e)
+    {
+        if (e.Key != Key.Escape) return;
+        if (SearchBox.Text.Length > 0)
+        {
+            SearchBox.Text = string.Empty;
+        }
+        else
+        {
+            RulesList.Focus();
+        }
+        e.Handled = true;
     }
 
     // 批量设置模式：Tag 承载目标模式（Proxy/Direct/Block），复用 v0.12 的 SetRulesMode 原子事务。

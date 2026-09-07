@@ -134,6 +134,11 @@ The roadmap is evidence-driven. Items move forward when implementation, tests, a
 - [x] Dedicated batch-result label on the rules toolbar with 4s hold + fade-out; no longer shares the runtime-status footer that async apply messages overwrite
 - [x] Feedback counts use service-returned matched counts instead of selection counts
 
+## v0.22 — rules-page keyboard interaction (2026-09-07)
+
+- [x] Double-click opens the constraints editor; Delete triggers the shared batch-delete confirmation; Ctrl+F focuses search; Escape clears search and restores list focus
+- [x] All interactions reuse the existing batch transaction, confirmation, and feedback paths — no service changes
+
 ## Candidate next work
 
 - [x] Guided sing-box discovery with version reporting

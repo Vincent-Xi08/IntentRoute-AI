@@ -4,6 +4,12 @@ All notable changes are documented here. The project follows semantic versioning
 
 ## [Unreleased]
 
+## [0.22.0] - 2026-09-07
+
+### Added
+
+- Keyboard and pointer polish on the rules page: double-clicking a rule row opens the constraints editor (same entry as the context menu's first item), the Delete key deletes the selected rules through the same count-formatted confirmation flow as batch delete, Ctrl+F focuses the search box while the rules page is visible, and Escape inside the search box clears it — a second Escape returns focus to the rule list. No service-layer changes; every path reuses the existing batch transaction and feedback label.
+
 ## [0.21.0] - 2026-09-07
 
 ### Fixed

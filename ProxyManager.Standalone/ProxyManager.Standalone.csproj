@@ -11,7 +11,7 @@
     <UseWPF>true</UseWPF>
     <AssemblyName>IntentRouteAI</AssemblyName>
     <RootNamespace>ProxyManager.Standalone</RootNamespace>
-    <Version>0.21.0</Version>
+    <Version>0.22.0</Version>
     <Authors>Lucas-Xi and contributors</Authors>
     <Company>IntentRoute AI contributors</Company>
     <Product>IntentRoute AI</Product>

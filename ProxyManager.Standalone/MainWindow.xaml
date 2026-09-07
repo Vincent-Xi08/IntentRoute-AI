@@ -8,7 +8,8 @@
         WindowStartupLocation="CenterScreen"
         ResizeMode="CanResizeWithGrip"
         WindowStyle="None"
-        AllowsTransparency="True">
+        AllowsTransparency="True"
+        PreviewKeyDown="Window_PreviewKeyDown">
 
     <!--
       v0.16 起设计系统统一在 App.xaml：色彩、按钮、输入框、下拉框、导航等
@@ -244,7 +245,7 @@
                                     <Grid Grid.Column="0" Margin="0,0,12,0">
                                         <TextBox x:Name="SearchBox" Width="240"
                                                  Style="{StaticResource InputBox}" FontSize="12"
-                                                 TextChanged="Search_Changed"/>
+                                                 TextChanged="Search_Changed" KeyDown="SearchBox_KeyDown"/>
                                         <TextBlock x:Name="SearchPlaceholder" Text="{x:Static loc:Strings.RulesSearchPlaceholder}"
                                                    Foreground="{StaticResource MutedTextBrush}"
                                                    FontSize="12" Margin="11,0,0,0"
@@ -342,6 +343,7 @@
                                 <ListBox x:Name="RulesList" Margin="0,38,0,0" Background="Transparent"
                                          BorderThickness="0" ScrollViewer.HorizontalScrollBarVisibility="Disabled"
                                          SelectionMode="Extended" SelectionChanged="RulesList_SelectionChanged"
+                                         MouseDoubleClick="RulesList_DoubleClick" KeyDown="RulesList_KeyDown"
                                          ContextMenu="{StaticResource RuleMenu}">
                                     <ListBox.ItemContainerStyle>
                                         <Style TargetType="ListBoxItem">
