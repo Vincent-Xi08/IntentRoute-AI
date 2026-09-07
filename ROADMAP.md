@@ -144,12 +144,17 @@ The roadmap is evidence-driven. Items move forward when implementation, tests, a
 - [x] Code-review pass over v0.15–v0.22 UI accumulations; fixed the batch-result timer's duplicate Tick subscription and residual-fade interaction
 - [x] Structural audit: all eight page grids' row indices fit their definitions; localization parity 549 keys; security boundaries (redaction, no telemetry) unchanged
 
+## v0.24 — mixed-DPI visual validation claimed (2026-09-07)
+
+- [x] Full manual procedure executed from the physical console on a 100% + 125% dual-display setup with the official v0.23.0 archive: launch, display-move re-render, maximized layout, and all eight pages verified crisp and unclipped (recorded in docs/mixed-dpi-verification.md)
+- [x] Root-caused the earlier "both displays 100%" environment readings: system-DPI-aware query processes get virtualized DPI, not a real environment limit
+
 ## Candidate next work
 
 - [x] Guided sing-box discovery with version reporting
 - [x] Authenticated local proxy editing in the UI
 - [x] Automated CI integration tests against a pinned real sing-box release
-- [ ] Visual layout validation across mixed-DPI displays (manual procedure documented in docs/mixed-dpi-verification.md; requires multi-monitor hardware — not claimed until a maintainer records a run)
+- [x] Visual layout validation across mixed-DPI displays (manual procedure executed and recorded 2026-09-07; see docs/mixed-dpi-verification.md)
 - [x] Localize AppService runtime-status and readiness text (the persisted default proxy name stays Chinese as configuration data)
 - [x] Decision: Policy Intelligence finding titles stay Chinese as stable deterministic-analysis identifiers (referenced by privacy-canary tests and cross-language user reports); they are analysis output, not UI chrome- [x] Corrupt-configuration recovery that preserves the source file, blocks accidental overwrite, and guides the user through restore
 - [ ] Signed release artifacts when sustainable signing infrastructure exists (the unsigned provenance inventory shipped in v0.9.0)

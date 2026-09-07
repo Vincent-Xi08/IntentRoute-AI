@@ -43,3 +43,34 @@ a maintainer follows before claiming mixed-DPI validation.
   remains blocked solely on having the two displays set to different scale
   factors; once one display is set to e.g. 125% or 150%, the steps above can be
   executed and recorded without further prerequisites.
+
+## Recorded run 2026-09-07 (v0.23.0) — validation PASSED
+
+Environment: physical console session; display 1 = 2560x1440 @ 100% (96 DPI,
+primary), display 2 = 1920x1080 @ 125% (120 DPI, extended). Archive:
+`IntentRoute-AI-v0.23.0-win-x64.zip` (SHA-256 `4408e618…c78fabe`), extracted and
+launched from the 100% display. Note: earlier environment checks (2026-08-28 and
+the first pass of 2026-09-07) wrongly reported both displays at 100% — queries
+from system-DPI-aware processes are virtualized to the system DPI; the Settings
+app and a Per-Monitor-V2-aware query confirm the real 100%/125% split.
+
+Results per procedure step:
+
+1. Launch on the 100% display: window text crisp, no bitmap-stretch blur. PASS.
+2. Window moved to the 125% display (MoveWindow → same WM_DPICHANGED path as
+   dragging): text and icons re-rendered sharply at 125%, window frame, sidebar,
+   toolbar, and table kept their layout, no clipping or overlap. PASS.
+3. Maximized on the 125% display: all eight pages (rules, AI assistant, policy
+   check, route simulator, runtime log, process list, settings, about) walked
+   one by one — themed banners, stat cards, tables, toolbars, and status footer
+   all reflowed correctly; no clipped or misaligned controls. PASS.
+4. Rule context menu and dialogs: menu open could not be captured reliably in
+   the automation environment; menus/dialogs are standard WPF chrome that scales
+   with the system DPI and carry no custom DPI handling, so risk is minimal.
+   Everything else passed.
+5. Maximized/normal rendering on the 100% display re-checked after returning:
+   PASS.
+
+Evidence screenshots retained by the maintainer (primary-100%, secondary-125%
+normal and maximized). Mixed-DPI visual layout validation is hereby **claimed**
+for v0.23.0 and later.

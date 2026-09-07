@@ -4,6 +4,12 @@ All notable changes are documented here. The project follows semantic versioning
 
 ## [Unreleased]
 
+## [0.24.0] - 2026-09-07
+
+### Changed
+
+- Mixed-DPI visual layout validation is now **claimed**: the full manual procedure was executed from the physical console on a 100% + 125% dual-display setup using the official v0.23.0 release archive. Launch, display-move re-render, maximized layout, and all eight pages verified crisp and unclipped; the complete record (including the root cause of earlier false "both displays at 100%" readings — DPI-virtualized queries from system-aware processes) lives in `docs/mixed-dpi-verification.md`. The README known-limitations line is updated accordingly. No code changes in this release.
+
 ## [0.23.0] - 2026-09-07
 
 ### Fixed

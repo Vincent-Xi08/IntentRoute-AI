@@ -8,7 +8,7 @@ English | **[中文](README.zh-CN.md)**
 
 IntentRoute AI is an open-source Windows control plane that turns plain-language network intent into locally validated routing-rule drafts. It can use the OpenAI Responses API or an already-running local Ollama model, then hands accepted rules to the same deterministic sing-box TUN configuration pipeline used by the manual editor.
 
-> **Project status: v0.23.0 preview.** IntentRoute AI is useful for testing and early adoption, but it has not yet demonstrated broad production usage. AI output can be incomplete or wrong. Every generated rule is locally validated, added disabled, and must be explicitly enabled by the user.
+> **Project status: v0.24.0 preview.** IntentRoute AI is useful for testing and early adoption, but it has not yet demonstrated broad production usage. AI output can be incomplete or wrong. Every generated rule is locally validated, added disabled, and must be explicitly enabled by the user.
 
 v0.19.0 adds batch mode buttons (proxy/direct/block) to the rules toolbar — exposing the previously UI-less `SetRulesMode` transaction — and severity coloring for runtime logs. v0.18.0 completed the UI renewal with theme-colored page banners and unified list-page grammar; v0.16–v0.17 established the shared dark design system and component-library polish; v0.15.0 added the rule-import preview with full-identity duplicate detection. Every release archive still embeds the unsigned `provenance.json` build inventory introduced in v0.9.0; code signing itself still requires a certificate.
 
@@ -135,7 +135,7 @@ IntentRoute AI does **not** provide a proxy node, VPN account, packet driver, bu
 
 ## Install a preview build
 
-1. Download `IntentRoute-AI-v0.23.0-win-x64.zip` and its `.sha256` file from [Releases](https://github.com/Vincent-Xi08/IntentRoute-AI/releases).
+1. Download `IntentRoute-AI-v0.24.0-win-x64.zip` and its `.sha256` file from [Releases](https://github.com/Vincent-Xi08/IntentRoute-AI/releases).
 2. Verify the checksum.
 3. Download the official Windows x64 sing-box v1.13+ archive separately.
 4. Install `sing-box.exe` separately, then explicitly approve its exact file from **Settings → Browse on every elevated app launch**. The saved path, imported profiles/configurations, `INTENTROUTE_SING_BOX`, the legacy `PROXYMANAGER_SING_BOX`, the application directory, and `PATH` are candidate-discovery hints only: they may be displayed, but neither `version`, `check`, nor `run` executes until that file is reselected in the current session.
@@ -200,7 +200,7 @@ Please report vulnerabilities privately through [GitHub Security Advisories](htt
 - Policy Intelligence proves only supported static containment/equality relations; provable partial overlaps are reported as explicitly non-proven hints, unprovable overlap claims are omitted, and live traffic is never observed.
 - Route simulation accepts only one exact process, one concrete domain or literal IP, one port, and TCP/UDP. It deliberately returns Indeterminate instead of resolving DNS, inferring a domain from an IP, or claiming a later rule wins when an earlier mixed destination rule cannot be excluded.
 - The UI is Chinese-first: every user-visible string follows the language preference with English (533 resource keys), except Policy Intelligence finding titles and the persisted default proxy-server name, which stay Chinese as stable deterministic-analysis identifiers and configuration data.
-- Keyboard navigation ships with visible focus states, assistive-technology names on navigation and primary actions, and smoke-level Tab/arrow-key coverage plus Per-Monitor V2 DPI-awareness assertions; comprehensive screen-reader behavior and visual layout validation across mixed-DPI displays are not yet claimed.
+- Keyboard navigation ships with visible focus states, assistive-technology names on navigation and primary actions, and smoke-level Tab/arrow-key coverage plus Per-Monitor V2 DPI-awareness assertions; mixed-DPI visual layout validation was executed and recorded 2026-09-07 (100% + 125% dual-display, see docs/mixed-dpi-verification.md). Comprehensive screen-reader behavior is not yet claimed.
 - Very large policies are bounded to keep the WPF UI responsive; a visible incomplete-analysis finding is emitted instead of silently presenting a partial report as complete.
 - No autonomous activation, traffic self-healing, live connection attribution, arbitrary executable wildcards, or remote Ollama endpoints.
 - No proxy node distribution or connectivity guarantee.
