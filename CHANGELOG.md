@@ -4,6 +4,12 @@ All notable changes are documented here. The project follows semantic versioning
 
 ## [Unreleased]
 
+## [0.21.0] - 2026-09-07
+
+### Fixed
+
+- Batch-operation feedback moved off the shared runtime-status footer: the v0.20 completion message was written to the same text the sing-box runtime asynchronously overwrites, so it usually vanished within a second. Each batch result now appears in a dedicated toolbar label showing the service-returned count of actually updated rules (not the selection count, which can differ if rules changed concurrently), stays for four seconds, and fades out. Runtime status keeps the footer to itself.
+
 ## [0.20.0] - 2026-09-03
 
 ### Changed

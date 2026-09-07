@@ -308,6 +308,8 @@
                                             Click="Clear_Click"/>
                                     <TextBlock Text="{x:Static loc:Strings.RulesBatchHint}" FontSize="11" VerticalAlignment="Center"
                                                Foreground="{StaticResource MutedTextBrush}" Margin="12,0,0,0"/>
+                                    <TextBlock x:Name="BatchResultText" FontSize="11" FontWeight="SemiBold" VerticalAlignment="Center"
+                                               Foreground="{StaticResource SuccessBrush}" Margin="12,0,0,0" Visibility="Collapsed"/>
                                 </StackPanel>
                             </Grid>
                         </Border>

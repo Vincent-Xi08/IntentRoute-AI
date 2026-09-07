@@ -1284,12 +1284,37 @@ public partial class MainWindow : Window
 
     private List<ProxyRule> GetSelectedRules() => RulesList.SelectedItems.OfType<ProxyRule>().ToList();
 
+    // 批量结果反馈走工具栏内的专用文本：不与异步运行状态共用 StatusDetail，
+    // 避免运行时 apply 消息把操作结果立刻覆盖；显示数秒后自动淡出。
+    private readonly System.Windows.Threading.DispatcherTimer _batchResultTimer =
+        new() { Interval = TimeSpan.FromSeconds(4) };
+
+    private void ShowBatchFeedback(string message)
+    {
+        BatchResultText.Text = message;
+        BatchResultText.Opacity = 1;
+        BatchResultText.Visibility = Visibility.Visible;
+        _batchResultTimer.Stop();
+        _batchResultTimer.Tick += BatchResultTimer_Tick;
+        _batchResultTimer.Start();
+    }
+
+    private void BatchResultTimer_Tick(object? sender, EventArgs e)
+    {
+        _batchResultTimer.Stop();
+        _batchResultTimer.Tick -= BatchResultTimer_Tick;
+        var fade = new DoubleAnimation(1, 0, TimeSpan.FromMilliseconds(400));
+        fade.Completed += (_, _) => BatchResultText.Visibility = Visibility.Collapsed;
+        BatchResultText.BeginAnimation(UIElement.OpacityProperty, fade);
+    }
+
     private void BatchEnable_Click(object sender, RoutedEventArgs e)
     {
         var rules = GetSelectedRules();
         if (rules.Count == 0) return;
-        _service.SetRulesEnabled(rules.Select(rule => rule.Id).ToList(), true);
-        StatusDetail.Text = string.Format(Strings.BatchOperationDoneFormat, Strings.RulesBatchEnable, rules.Count);
+        var updated = _service.SetRulesEnabled(rules.Select(rule => rule.Id).ToList(), true);
+        if (updated > 0)
+            ShowBatchFeedback(string.Format(Strings.BatchOperationDoneFormat, Strings.RulesBatchEnable, updated));
         LoadRules();
         UpdateBatchRuleButtons();
     }
@@ -1298,8 +1323,9 @@ public partial class MainWindow : Window
     {
         var rules = GetSelectedRules();
         if (rules.Count == 0) return;
-        _service.SetRulesEnabled(rules.Select(rule => rule.Id).ToList(), false);
-        StatusDetail.Text = string.Format(Strings.BatchOperationDoneFormat, Strings.RulesBatchDisable, rules.Count);
+        var updated = _service.SetRulesEnabled(rules.Select(rule => rule.Id).ToList(), false);
+        if (updated > 0)
+            ShowBatchFeedback(string.Format(Strings.BatchOperationDoneFormat, Strings.RulesBatchDisable, updated));
         LoadRules();
         UpdateBatchRuleButtons();
     }
@@ -1311,8 +1337,9 @@ public partial class MainWindow : Window
         if (MessageBox.Show(string.Format(Strings.RulesBatchDeleteConfirmFormat, rules.Count), Strings.DialogConfirmTitle,
             MessageBoxButton.YesNo, MessageBoxImage.Question) == MessageBoxResult.Yes)
         {
-            _service.RemoveRules(rules.Select(rule => rule.Id).ToList());
-            StatusDetail.Text = string.Format(Strings.BatchOperationDoneFormat, Strings.RulesBatchDelete, rules.Count);
+            var removed = _service.RemoveRules(rules.Select(rule => rule.Id).ToList());
+            if (removed > 0)
+                ShowBatchFeedback(string.Format(Strings.BatchOperationDoneFormat, Strings.RulesBatchDelete, removed));
             LoadRules();
             UpdateBatchRuleButtons();
         }
@@ -1325,14 +1352,15 @@ public partial class MainWindow : Window
             return;
         var rules = GetSelectedRules();
         if (rules.Count == 0) return;
-        _service.SetRulesMode(rules.Select(rule => rule.Id).ToList(), mode);
-        StatusDetail.Text = string.Format(Strings.BatchOperationDoneFormat, mode switch
-        {
-            ProxyMode.Proxy => Strings.RulesBatchProxy,
-            ProxyMode.Direct => Strings.RulesBatchDirect,
-            ProxyMode.Block => Strings.RulesBatchBlock,
-            _ => mode.ToString()
-        }, rules.Count);
+        var updated = _service.SetRulesMode(rules.Select(rule => rule.Id).ToList(), mode);
+        if (updated > 0)
+            ShowBatchFeedback(string.Format(Strings.BatchOperationDoneFormat, mode switch
+            {
+                ProxyMode.Proxy => Strings.RulesBatchProxy,
+                ProxyMode.Direct => Strings.RulesBatchDirect,
+                ProxyMode.Block => Strings.RulesBatchBlock,
+                _ => mode.ToString()
+            }, updated));
         LoadRules();
         UpdateBatchRuleButtons();
     }

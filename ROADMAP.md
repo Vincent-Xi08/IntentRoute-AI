@@ -129,6 +129,11 @@ The roadmap is evidence-driven. Items move forward when implementation, tests, a
 - [x] Localized batch-operation success feedback with affected-rule counts, emitted only after the existing atomic transaction returns successfully
 - [x] 160ms ease-out page fade-in, preserving Visibility routing, UIA, and keyboard navigation contracts
 
+## v0.21 — batch feedback boundary fix (2026-09-07)
+
+- [x] Dedicated batch-result label on the rules toolbar with 4s hold + fade-out; no longer shares the runtime-status footer that async apply messages overwrite
+- [x] Feedback counts use service-returned matched counts instead of selection counts
+
 ## Candidate next work
 
 - [x] Guided sing-box discovery with version reporting
