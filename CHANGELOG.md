@@ -4,6 +4,13 @@ All notable changes are documented here. The project follows semantic versioning
 
 ## [Unreleased]
 
+## [0.20.0] - 2026-09-03
+
+### Changed
+
+- Batch rule operations now report a localized completion message in the runtime-status footer after the atomic transaction succeeds (enable / disable / delete / proxy / direct / block), including the affected rule count. A failed transaction still follows the existing exception path and never reports success.
+- Page switching now fades the selected page in over 160ms with an ease-out curve. The existing Visibility routing, UI Automation tree, and keyboard activation path remain unchanged; the animation is purely presentational.
+
 ## [0.19.0] - 2026-09-03
 
 ### Added

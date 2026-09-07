@@ -7,6 +7,7 @@ using System.Windows.Controls;
 using System.Windows.Data;
 using System.Windows.Input;
 using System.Windows.Media;
+using System.Windows.Media.Animation;
 using Microsoft.Win32;
 using Strings = ProxyManager.Standalone.Localization.Strings;
 
@@ -202,6 +203,17 @@ public partial class MainWindow : Window
 
         if (pageName == "NavRouteSimulator")
             RefreshRouteDecisionFreshness();
+
+        // 页面内容淡入，保留原有 Visibility 切换与 UIA/键盘契约。
+        if (page is FrameworkElement element)
+        {
+            element.Opacity = 0;
+            var fade = new DoubleAnimation(0, 1, TimeSpan.FromMilliseconds(160))
+            {
+                EasingFunction = new CubicEase { EasingMode = EasingMode.EaseOut }
+            };
+            element.BeginAnimation(UIElement.OpacityProperty, fade);
+        }
     }
 
     #endregion
@@ -1277,6 +1289,7 @@ public partial class MainWindow : Window
         var rules = GetSelectedRules();
         if (rules.Count == 0) return;
         _service.SetRulesEnabled(rules.Select(rule => rule.Id).ToList(), true);
+        StatusDetail.Text = string.Format(Strings.BatchOperationDoneFormat, Strings.RulesBatchEnable, rules.Count);
         LoadRules();
         UpdateBatchRuleButtons();
     }
@@ -1286,6 +1299,7 @@ public partial class MainWindow : Window
         var rules = GetSelectedRules();
         if (rules.Count == 0) return;
         _service.SetRulesEnabled(rules.Select(rule => rule.Id).ToList(), false);
+        StatusDetail.Text = string.Format(Strings.BatchOperationDoneFormat, Strings.RulesBatchDisable, rules.Count);
         LoadRules();
         UpdateBatchRuleButtons();
     }
@@ -1298,6 +1312,7 @@ public partial class MainWindow : Window
             MessageBoxButton.YesNo, MessageBoxImage.Question) == MessageBoxResult.Yes)
         {
             _service.RemoveRules(rules.Select(rule => rule.Id).ToList());
+            StatusDetail.Text = string.Format(Strings.BatchOperationDoneFormat, Strings.RulesBatchDelete, rules.Count);
             LoadRules();
             UpdateBatchRuleButtons();
         }
@@ -1311,6 +1326,13 @@ public partial class MainWindow : Window
         var rules = GetSelectedRules();
         if (rules.Count == 0) return;
         _service.SetRulesMode(rules.Select(rule => rule.Id).ToList(), mode);
+        StatusDetail.Text = string.Format(Strings.BatchOperationDoneFormat, mode switch
+        {
+            ProxyMode.Proxy => Strings.RulesBatchProxy,
+            ProxyMode.Direct => Strings.RulesBatchDirect,
+            ProxyMode.Block => Strings.RulesBatchBlock,
+            _ => mode.ToString()
+        }, rules.Count);
         LoadRules();
         UpdateBatchRuleButtons();
     }

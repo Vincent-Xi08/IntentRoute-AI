@@ -124,6 +124,11 @@ The roadmap is evidence-driven. Items move forward when implementation, tests, a
 - [x] Batch proxy/direct/block buttons on the rules toolbar, driving the existing tested `SetRulesMode` transaction that had no UI entry point; smoke gate extended to all six batch buttons
 - [x] Runtime-log severity coloring (warn amber / error red / fatal red bold) parsed on arrival via the shared level parser
 
+## v0.20 — operation feedback and page transitions (2026-09-03)
+
+- [x] Localized batch-operation success feedback with affected-rule counts, emitted only after the existing atomic transaction returns successfully
+- [x] 160ms ease-out page fade-in, preserving Visibility routing, UIA, and keyboard navigation contracts
+
 ## Candidate next work
 
 - [x] Guided sing-box discovery with version reporting

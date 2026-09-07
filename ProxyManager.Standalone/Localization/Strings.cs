@@ -289,6 +289,7 @@ public static class Strings
     public static string RulesBatchBlockAutomation => GetString(nameof(RulesBatchBlockAutomation));
     public static string RulesBatchDeleteConfirmFormat => GetString(nameof(RulesBatchDeleteConfirmFormat));
     public static string RulesBatchHint => GetString(nameof(RulesBatchHint));
+    public static string BatchOperationDoneFormat => GetString(nameof(BatchOperationDoneFormat));
     public static string CommonCancel => GetString(nameof(CommonCancel));
     public static string DialogImportTitle => GetString(nameof(DialogImportTitle));
     public static string DialogExportTitle => GetString(nameof(DialogExportTitle));

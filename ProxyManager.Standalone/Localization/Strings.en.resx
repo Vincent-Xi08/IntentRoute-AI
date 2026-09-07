@@ -44,7 +44,7 @@
   <data name="NavSectionWorkspace" xml:space="preserve"><value>Rules &amp; policy</value></data>
   <data name="NavSectionRuntime" xml:space="preserve"><value>Runtime &amp; monitoring</value></data>
   <data name="NavSectionApp" xml:space="preserve"><value>Application</value></data>
-  <data name="SidebarVersion" xml:space="preserve"><value>v0.19.0 development preview</value></data>
+  <data name="SidebarVersion" xml:space="preserve"><value>v0.20.0 development preview</value></data>
   <data name="StatusFooterLabel" xml:space="preserve"><value>Runtime status</value></data>
   <data name="StatusFooterInitial" xml:space="preserve"><value>Checking sing-box…</value></data>
   <data name="ModeDirectLabel" xml:space="preserve"><value>Direct by default</value></data>
@@ -93,7 +93,7 @@
   <data name="RuleEditBadIps" xml:space="preserve"><value>Invalid IP/CIDR constraint format</value></data>
   <data name="RuleEditBadPorts" xml:space="preserve"><value>Invalid port constraint format</value></data>
   <data name="RuleEditBadProtocol" xml:space="preserve"><value>Protocol must be TCP, UDP, Both, or Any</value></data>
-  <data name="AboutTagline" xml:space="preserve"><value>AI-assisted Windows network routing v0.19.0</value></data>
+  <data name="AboutTagline" xml:space="preserve"><value>AI-assisted Windows network routing v0.20.0</value></data>
   <data name="AboutFeaturesTitle" xml:space="preserve"><value>Features</value></data>
   <data name="AboutFeature1" xml:space="preserve"><value>• Drag an application to add rules</value></data>
   <data name="AboutFeature2" xml:space="preserve"><value>• Proxy / direct / block routing modes</value></data>
@@ -381,6 +381,7 @@
   <data name="RulesBatchBlockAutomation" xml:space="preserve"><value>Set the selected rules to block mode</value></data>
   <data name="RulesBatchDeleteConfirmFormat" xml:space="preserve"><value>Delete the {0} selected rules?</value></data>
   <data name="RulesBatchHint" xml:space="preserve"><value>Enabled after selecting rows (Ctrl/Shift to multi-select)</value></data>
+  <data name="BatchOperationDoneFormat" xml:space="preserve"><value>Completed: {0} ({1} rules)</value></data>
   <data name="DialogImportTitle" xml:space="preserve"><value>Import rules</value></data>
   <data name="DialogExportTitle" xml:space="preserve"><value>Export rules</value></data>
   <data name="DialogJsonFilter" xml:space="preserve"><value>JSON files (*.json)|*.json</value></data>
