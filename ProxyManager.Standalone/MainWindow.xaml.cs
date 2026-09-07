@@ -75,6 +75,7 @@ public partial class MainWindow : Window
         });
 
         Loaded += MainWindow_Loaded;
+        _batchResultTimer.Tick += BatchResultTimer_Tick;
         RulesList.ItemsSource = _rules;
         _logsView = CollectionViewSource.GetDefaultView(_runtimeLogs);
         _logsView.Filter = o => o is RuntimeLogLine l &&
@@ -1286,23 +1287,24 @@ public partial class MainWindow : Window
 
     // 批量结果反馈走工具栏内的专用文本：不与异步运行状态共用 StatusDetail，
     // 避免运行时 apply 消息把操作结果立刻覆盖；显示数秒后自动淡出。
+    // Tick 只在构造时订阅一次：Stop 后不再触发，避免每次显示重复挂接。
     private readonly System.Windows.Threading.DispatcherTimer _batchResultTimer =
         new() { Interval = TimeSpan.FromSeconds(4) };
 
     private void ShowBatchFeedback(string message)
     {
+        // 清掉上一次可能仍在进行的淡出动画，再恢复不透明显示。
+        BatchResultText.BeginAnimation(UIElement.OpacityProperty, null);
         BatchResultText.Text = message;
         BatchResultText.Opacity = 1;
         BatchResultText.Visibility = Visibility.Visible;
         _batchResultTimer.Stop();
-        _batchResultTimer.Tick += BatchResultTimer_Tick;
         _batchResultTimer.Start();
     }
 
     private void BatchResultTimer_Tick(object? sender, EventArgs e)
     {
         _batchResultTimer.Stop();
-        _batchResultTimer.Tick -= BatchResultTimer_Tick;
         var fade = new DoubleAnimation(1, 0, TimeSpan.FromMilliseconds(400));
         fade.Completed += (_, _) => BatchResultText.Visibility = Visibility.Collapsed;
         BatchResultText.BeginAnimation(UIElement.OpacityProperty, fade);

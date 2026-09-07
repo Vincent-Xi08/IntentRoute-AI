@@ -44,7 +44,7 @@
   <data name="NavSectionWorkspace" xml:space="preserve"><value>Rules &amp; policy</value></data>
   <data name="NavSectionRuntime" xml:space="preserve"><value>Runtime &amp; monitoring</value></data>
   <data name="NavSectionApp" xml:space="preserve"><value>Application</value></data>
-  <data name="SidebarVersion" xml:space="preserve"><value>v0.22.0 development preview</value></data>
+  <data name="SidebarVersion" xml:space="preserve"><value>v0.23.0 development preview</value></data>
   <data name="StatusFooterLabel" xml:space="preserve"><value>Runtime status</value></data>
   <data name="StatusFooterInitial" xml:space="preserve"><value>Checking sing-box…</value></data>
   <data name="ModeDirectLabel" xml:space="preserve"><value>Direct by default</value></data>
@@ -93,7 +93,7 @@
   <data name="RuleEditBadIps" xml:space="preserve"><value>Invalid IP/CIDR constraint format</value></data>
   <data name="RuleEditBadPorts" xml:space="preserve"><value>Invalid port constraint format</value></data>
   <data name="RuleEditBadProtocol" xml:space="preserve"><value>Protocol must be TCP, UDP, Both, or Any</value></data>
-  <data name="AboutTagline" xml:space="preserve"><value>AI-assisted Windows network routing v0.22.0</value></data>
+  <data name="AboutTagline" xml:space="preserve"><value>AI-assisted Windows network routing v0.23.0</value></data>
   <data name="AboutFeaturesTitle" xml:space="preserve"><value>Features</value></data>
   <data name="AboutFeature1" xml:space="preserve"><value>• Drag an application to add rules</value></data>
   <data name="AboutFeature2" xml:space="preserve"><value>• Proxy / direct / block routing modes</value></data>

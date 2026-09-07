@@ -139,6 +139,11 @@ The roadmap is evidence-driven. Items move forward when implementation, tests, a
 - [x] Double-click opens the constraints editor; Delete triggers the shared batch-delete confirmation; Ctrl+F focuses search; Escape clears search and restores list focus
 - [x] All interactions reuse the existing batch transaction, confirmation, and feedback paths — no service changes
 
+## v0.23 — review hardening (2026-09-07)
+
+- [x] Code-review pass over v0.15–v0.22 UI accumulations; fixed the batch-result timer's duplicate Tick subscription and residual-fade interaction
+- [x] Structural audit: all eight page grids' row indices fit their definitions; localization parity 549 keys; security boundaries (redaction, no telemetry) unchanged
+
 ## Candidate next work
 
 - [x] Guided sing-box discovery with version reporting

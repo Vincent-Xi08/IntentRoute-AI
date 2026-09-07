@@ -4,6 +4,12 @@ All notable changes are documented here. The project follows semantic versioning
 
 ## [Unreleased]
 
+## [0.23.0] - 2026-09-07
+
+### Fixed
+
+- Review-hardening pass over the v0.15–v0.22 UI accumulations: the batch-result label's auto-hide timer was re-subscribed on every show, so rapid consecutive batch operations stacked duplicate Tick handlers; the timer now subscribes once at construction, and re-showing the label clears any in-flight fade animation before restoring opacity. A structural audit of all eight page grids confirmed every direct child row index fits its row definitions (the class of v0.18 overlap regression has no remaining instances), and the zh/en resource sets remain in parity at 549 keys.
+
 ## [0.22.0] - 2026-09-07
 
 ### Added
