@@ -183,7 +183,7 @@ The roadmap is evidence-driven. Items move forward when implementation, tests, a
 ## Rust migration — phased rewrite
 
 - [x] Phase 1 (2026-09-13): `intentroute-core` crate (rule model / constraint validation / identity / import planning / runtime order, C#-parity tests) + `intentroute-cli` (`check`/`order`/`import-preview`), validated against the real product config; CI gate `scripts/test-rust.ps1`
-- [ ] Phase 2: port `SingBoxConfigBuilder` and the pinned real-sing-box integration gate to the Rust core
+- [x] Phase 2 (2026-09-13): sing-box configuration builder ported to the Rust core with loopback-only upstream validation, redaction, and password-scrubbed errors; CLI `build-config`; the pinned real-sing-box gate validates both C# and Rust builder output against v1.13.19 (37 core tests)
 - [ ] Phase 3: Rust GUI shell (Tauri or native) replacing the WPF front end page by page; the WPF product remains supported until parity is proven
 
 ## Candidate next work

@@ -33,6 +33,10 @@ jobs:
         shell: pwsh
         run: dotnet test ProxyManager.Tests/ProxyManager.Tests.csproj --configuration Release --no-restore --logger "trx;LogFileName=tests.trx"
 
+      - name: Test and build Rust core (migration)
+        shell: pwsh
+        run: ./scripts/test-rust.ps1
+
       - name: Validate builder output with pinned real sing-box
         shell: pwsh
         run: ./scripts/test-pinned-sing-box.ps1
@@ -40,10 +44,6 @@ jobs:
       - name: Validate release-notes extraction
         shell: pwsh
         run: ./scripts/test-release-notes.ps1
-
-      - name: Test Rust core (migration phase 1)
-        shell: pwsh
-        run: ./scripts/test-rust.ps1
 
       - name: Check vulnerable dependencies
         shell: pwsh

@@ -6,7 +6,7 @@ All notable changes are documented here. The project follows semantic versioning
 
 ### Added (repository)
 
-- Rust migration, phase 1: a `rust/` workspace with `intentroute-core` (rule model JSON-compatible with the C# store, constraint validator, rule identity, import planner, canonical runtime order — test vectors ported from the C# suites, 21 tests) and `intentroute-cli` (`check` / `order` / `import-preview` over rule-export or full-config files, strict UTF-8). The CLI has been exercised against the real product `config.json`. CI gains a `scripts/test-rust.ps1` gate; the WPF product is untouched this phase.
+- Rust migration, phase 2: `intentroute-core` gains the sing-box configuration builder (loopback-only upstream validation, sanitized outbound tags, canonical-order rule compilation with host/IP/port/protocol semantics, password redaction, password-scrubbed error text) and the CLI gains `build-config` (redacted by default, `--full` only for feeding `sing-box check` via file redirect). The pinned real-sing-box gate now validates the Rust builder output against the official v1.13.19 binary alongside the C# output, and asserts the redacted form never carries the fixture password. 16 new Rust tests bring the core suite to 37.
 
 ## [0.31.0] - 2026-09-13
 
