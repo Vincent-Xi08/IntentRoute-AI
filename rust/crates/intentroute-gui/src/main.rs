@@ -1,4 +1,4 @@
-//! intentroute-gui — read-only rules console (Rust migration, phase 3a).
+//! intentroute-gui — read-only rules console (Rust migration, phase 3a+3b).
 //!
 //! A pure-Rust eframe/egui shell over the shared `intentroute-core`: loads the
 //! real product configuration (strict UTF-8, schema-checked), shows rules in
@@ -7,8 +7,13 @@
 //! editing (and the DPAPI password boundary it implies) stays in the WPF app
 //! until the Rust shell proves parity.
 //!
-//! UI strings are English for this phase: egui's bundled fonts do not cover
-//! CJK, and shipping a CJK font file is deferred with the edit paths.
+//! Phase 3b — Chinese UI parity: a CJK system font (Microsoft YaHei → SimHei →
+//! SimSun) is loaded at runtime so Chinese renders correctly; nothing is
+//! bundled into the repository. When no CJK font is present the UI falls back
+//! to English instead of rendering placeholder boxes. `INTENTROUTE_GUI_LANG`
+//! (zh|en) overrides the automatic choice. GUI strings are self-contained in
+//! this crate for now — the 553-key WPF resource system is not yet wired into
+//! Rust.
 
 use eframe::egui;
 use egui::{Color32, RichText, Sense};
@@ -26,6 +31,194 @@ const GREEN: Color32 = Color32::from_rgb(0x3F, 0xB9, 0x50);
 const RED: Color32 = Color32::from_rgb(0xF8, 0x51, 0x49);
 const AMBER: Color32 = Color32::from_rgb(0xD2, 0x99, 0x22);
 
+// ── UI strings (self-contained; see module docs) ────────────────────────────
+
+struct UiStrings {
+    title: &'static str,
+    file: &'static str,
+    open: &'static str,
+    reload: &'static str,
+    reload_short: &'static str,
+    readonly_banner: &'static str,
+    filter: &'static str,
+    filter_hint: &'static str,
+    col_index: &'static str,
+    col_process: &'static str,
+    col_mode: &'static str,
+    col_status: &'static str,
+    col_priority: &'static str,
+    col_created: &'static str,
+    col_constraints: &'static str,
+    all_traffic: &'static str,
+    enabled: &'static str,
+    disabled: &'static str,
+    mode_proxy: &'static str,
+    mode_direct: &'static str,
+    mode_block: &'static str,
+    no_config: &'static str,
+    no_match: &'static str,
+    detail: &'static str,
+    note_prefix: &'static str,
+    label_id: &'static str,
+    label_path: &'static str,
+    label_msp: &'static str,
+    label_hosts: &'static str,
+    label_ips: &'static str,
+    label_ports: &'static str,
+    valid: &'static str,
+    invalid_prefix: &'static str,
+    status_none: &'static str,
+    status_failed: &'static str,
+    status_loaded_fmt: &'static str, // {path} {count}
+    dash: &'static str,
+}
+
+const ZH: UiStrings = UiStrings {
+    title: "IntentRoute AI — 规则控制台（只读）",
+    file: "文件",
+    open: "打开… (Ctrl+O)",
+    reload: "重新加载 (F5)",
+    reload_short: "重新加载",
+    readonly_banner: "只读控制台 —— 请在 WPF 应用中编辑",
+    filter: "过滤",
+    filter_hint: "进程 / 域名 / 备注",
+    col_index: "#",
+    col_process: "进程",
+    col_mode: "模式",
+    col_status: "状态",
+    col_priority: "优先级",
+    col_created: "创建时间",
+    col_constraints: "约束",
+    all_traffic: "全部流量",
+    enabled: "已启用",
+    disabled: "已禁用",
+    mode_proxy: "代理",
+    mode_direct: "直连",
+    mode_block: "阻止",
+    no_config: "尚未加载配置 —— Ctrl+O 打开 config.json，或从 %APPDATA%\\IntentRouteAI 自动加载",
+    no_match: "没有符合过滤条件的规则",
+    detail: "详情",
+    note_prefix: "备注：",
+    label_id: "ID",
+    label_path: "路径",
+    label_msp: "模式 / 状态 / 优先级",
+    label_hosts: "域名",
+    label_ips: "IP / CIDR",
+    label_ports: "端口",
+    valid: "约束校验：通过",
+    invalid_prefix: "约束无效：",
+    status_none: "未加载配置 —— Ctrl+O 打开",
+    status_failed: "加载失败",
+    status_loaded_fmt: "已加载 {path} —— {count} 条规则",
+    dash: "—",
+};
+
+const EN: UiStrings = UiStrings {
+    title: "IntentRoute AI — rules console (read-only)",
+    file: "file",
+    open: "open… (Ctrl+O)",
+    reload: "reload (F5)",
+    reload_short: "reload",
+    readonly_banner: "read-only console — edit in the WPF app",
+    filter: "filter",
+    filter_hint: "process / hosts / note",
+    col_index: "#",
+    col_process: "process",
+    col_mode: "mode",
+    col_status: "status",
+    col_priority: "priority",
+    col_created: "created",
+    col_constraints: "constraints",
+    all_traffic: "all traffic",
+    enabled: "enabled",
+    disabled: "disabled",
+    mode_proxy: "Proxy",
+    mode_direct: "Direct",
+    mode_block: "Block",
+    no_config: "no configuration loaded — Ctrl+O opens a config.json, or launch from %APPDATA%\\IntentRouteAI",
+    no_match: "no rules match the filter",
+    detail: "detail",
+    note_prefix: "note: ",
+    label_id: "id",
+    label_path: "path",
+    label_msp: "mode / status / priority",
+    label_hosts: "hosts",
+    label_ips: "ip / cidr",
+    label_ports: "ports",
+    valid: "constraints: valid",
+    invalid_prefix: "constraints invalid: ",
+    status_none: "no configuration loaded — Ctrl+O to open",
+    status_failed: "load failed",
+    status_loaded_fmt: "loaded {path} — {count} rule(s)",
+    dash: "—",
+};
+
+/// Constraint error names from the core are English; map to Chinese for the
+/// detail panel when the Chinese UI is active.
+fn explain_localized(rule: &ProxyRule, zh: bool) -> Vec<&'static str> {
+    constraint::explain(&rule.target_hosts, &rule.target_ips, &rule.target_ports)
+        .into_iter()
+        .map(|error| {
+            if !zh {
+                return error;
+            }
+            match error {
+                "invalid host list" => "域名列表无效",
+                "invalid IP/CIDR list" => "IP/CIDR 列表无效",
+                "invalid port list" => "端口列表无效",
+                _ => error,
+            }
+        })
+        .collect()
+}
+
+// ── CJK font loading (runtime system fonts, nothing bundled) ────────────────
+
+const CJK_FONT_CANDIDATES: [(&str, &str); 3] = [
+    (r"C:\Windows\Fonts\msyh.ttc", "Microsoft YaHei"),
+    (r"C:\Windows\Fonts\simhei.ttf", "SimHei"),
+    (r"C:\Windows\Fonts\simsun.ttc", "SimSun"),
+];
+
+/// First CJK system font that exists on this machine (checked, not loaded).
+fn probe_cjk_font() -> Option<&'static str> {
+    CJK_FONT_CANDIDATES
+        .iter()
+        .find(|(path, _)| PathBuf::from(path).is_file())
+        .map(|(_, name)| *name)
+}
+
+/// Registers the first loadable CJK system font as a fallback for every egui
+/// font family. Returns the font name on success.
+fn install_cjk_font(ctx: &egui::Context) -> Option<&'static str> {
+    let (path, name) = CJK_FONT_CANDIDATES
+        .iter()
+        .find(|(path, _)| PathBuf::from(path).is_file())?;
+    let bytes = std::fs::read(path).ok()?;
+
+    let mut fonts = egui::FontDefinitions::default();
+    fonts
+        .font_data
+        .insert("cjk".into(), egui::FontData::from_owned(bytes).into());
+    // Appended last: Latin glyphs keep the bundled faces, CJK falls through.
+    for family in [egui::FontFamily::Proportional, egui::FontFamily::Monospace] {
+        fonts.families.entry(family).or_default().push("cjk".into());
+    }
+    ctx.set_fonts(fonts);
+    let _ = name;
+    Some(name)
+}
+
+fn resolve_language() -> bool {
+    match std::env::var("INTENTROUTE_GUI_LANG").as_deref() {
+        Ok("en") => false,
+        Ok("zh") => true,
+        _ => probe_cjk_font().is_some(),
+    }
+}
+
+// ── Sorting / filtering ─────────────────────────────────────────────────────
+
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum SortKey {
     Canonical,
@@ -37,14 +230,14 @@ enum SortKey {
 }
 
 impl SortKey {
-    fn label(self) -> &'static str {
+    fn label(self, s: &UiStrings) -> &'static str {
         match self {
-            SortKey::Canonical => "#",
-            SortKey::Process => "process",
-            SortKey::Mode => "mode",
-            SortKey::Enabled => "status",
-            SortKey::Priority => "priority",
-            SortKey::Created => "created",
+            SortKey::Canonical => s.col_index,
+            SortKey::Process => s.col_process,
+            SortKey::Mode => s.col_mode,
+            SortKey::Enabled => s.col_status,
+            SortKey::Priority => s.col_priority,
+            SortKey::Created => s.col_created,
         }
     }
 
@@ -52,15 +245,11 @@ impl SortKey {
         let mut indexed: Vec<usize> = (0..rules.len()).collect();
         match self {
             SortKey::Canonical => {
-                // canonical_order already sorts clones; map back to source indices
                 let ordered = canonical_order(rules.to_vec());
-                let mut result = Vec::with_capacity(rules.len());
-                for rule in &ordered {
-                    if let Some(index) = rules.iter().position(|r| r.id == rule.id) {
-                        result.push(index);
-                    }
-                }
-                result
+                ordered
+                    .iter()
+                    .filter_map(|rule| rules.iter().position(|r| r.id == rule.id))
+                    .collect()
             }
             SortKey::Process => {
                 indexed.sort_by(|&a, &b| rules[a].exe_name.cmp(&rules[b].exe_name));
@@ -86,7 +275,10 @@ impl SortKey {
     }
 }
 
+// ── App ─────────────────────────────────────────────────────────────────────
+
 struct ConsoleApp {
+    s: &'static UiStrings,
     config_path: Option<PathBuf>,
     config: Option<AppConfig>,
     rules: Vec<ProxyRule>,
@@ -100,8 +292,10 @@ struct ConsoleApp {
 }
 
 impl ConsoleApp {
-    fn new() -> Self {
+    fn new(zh: bool) -> Self {
+        let s = if zh { &ZH } else { &EN };
         let mut app = Self {
+            s,
             config_path: None,
             config: None,
             rules: Vec::new(),
@@ -111,7 +305,7 @@ impl ConsoleApp {
             sort_descending: false,
             selected_id: None,
             error: None,
-            status: String::from("no configuration loaded — Ctrl+O to open"),
+            status: s.status_none.to_string(),
         };
         if let Some(appdata) = std::env::var_os("APPDATA") {
             let default = PathBuf::from(appdata).join("IntentRouteAI").join("config.json");
@@ -126,28 +320,28 @@ impl ConsoleApp {
         match std::fs::read(path)
             .map_err(|e| format!("cannot read {}: {e}", path.display()))
             .and_then(|bytes| {
-                let text = std::str::from_utf8(&bytes).map_err(|_| {
-                    format!("{} is not valid UTF-8", path.display())
-                })?;
-                serde_json::from_str::<AppConfig>(text)
-                    .map_err(|e| format!("{} does not match the config schema: {e}", path.display()))
+                let text =
+                    std::str::from_utf8(&bytes).map_err(|_| format!("{} is not valid UTF-8", path.display()))?;
+                serde_json::from_str::<AppConfig>(text).map_err(|e| {
+                    format!("{} does not match the config schema: {e}", path.display())
+                })
             }) {
             Ok(config) => {
                 self.rules = config.rules.clone();
                 self.config = Some(config);
                 self.config_path = Some(path.clone());
                 self.error = None;
-                self.status = format!(
-                    "loaded {} — {} rule(s)",
-                    path.display(),
-                    self.rules.len()
-                );
+                self.status = self
+                    .s
+                    .status_loaded_fmt
+                    .replace("{path}", &path.display().to_string())
+                    .replace("{count}", &self.rules.len().to_string());
                 self.selected_id = None;
                 self.rebuild_view();
             }
             Err(error) => {
                 self.error = Some(error);
-                self.status = String::from("load failed");
+                self.status = self.s.status_failed.to_string();
             }
         }
     }
@@ -160,7 +354,7 @@ impl ConsoleApp {
 
     fn rebuild_view(&mut self) {
         let needle = self.search.trim().to_lowercase();
-        let mut indexes: Vec<usize> = (0..self.rules.len())
+        let matching: Vec<usize> = (0..self.rules.len())
             .filter(|&i| {
                 needle.is_empty()
                     || self.rules[i].exe_name.to_lowercase().contains(&needle)
@@ -169,15 +363,15 @@ impl ConsoleApp {
             })
             .collect();
 
-        let sorted = self.sort_key.order_of(&self.rules);
-        let mut view: Vec<usize> = sorted
+        let mut view: Vec<usize> = self
+            .sort_key
+            .order_of(&self.rules)
             .into_iter()
-            .filter(|index| indexes.contains(index))
+            .filter(|index| matching.contains(index))
             .collect();
         if self.sort_descending {
             view.reverse();
         }
-        indexes.clear();
         self.view = view;
     }
 
@@ -189,29 +383,33 @@ impl ConsoleApp {
         }
     }
 
-    fn condition_summary(rule: &ProxyRule) -> String {
+    fn mode_label(mode: ProxyMode, s: &UiStrings) -> &'static str {
+        match mode {
+            ProxyMode::Proxy => s.mode_proxy,
+            ProxyMode::Direct => s.mode_direct,
+            ProxyMode::Block => s.mode_block,
+        }
+    }
+
+    fn condition_summary(rule: &ProxyRule, s: &UiStrings) -> String {
         let mut parts: Vec<String> = Vec::new();
         if !rule.target_hosts.trim().is_empty() {
-            parts.push(format!("hosts {}", rule.target_hosts));
+            parts.push(format!("{} {}", s.label_hosts, rule.target_hosts));
         }
         if !rule.target_ips.trim().is_empty() {
-            parts.push(format!("ip {}", rule.target_ips));
+            parts.push(format!("{} {}", s.label_ips, rule.target_ips));
         }
         if !rule.target_ports.trim().is_empty() {
-            parts.push(format!("port {}", rule.target_ports));
+            parts.push(format!("{} {}", s.label_ports, rule.target_ports));
         }
         if !rule.protocol.trim().is_empty() {
             parts.push(rule.protocol.to_uppercase());
         }
         if parts.is_empty() {
-            String::from("all traffic")
+            s.all_traffic.to_string()
         } else {
             parts.join(" | ")
         }
-    }
-
-    fn validation_errors(rule: &ProxyRule) -> Vec<&'static str> {
-        constraint::explain(&rule.target_hosts, &rule.target_ips, &rule.target_ports)
     }
 }
 
@@ -228,19 +426,16 @@ impl eframe::App for ConsoleApp {
 
         let mut action_open = false;
         let mut action_reload = false;
+        let s = self.s;
 
         egui::TopBottomPanel::top("menubar").show(ctx, |ui| {
             egui::menu::bar(ui, |ui| {
-                ui.menu_button("file", |ui| {
-                    action_open |= ui.button("open… (Ctrl+O)").clicked();
-                    action_reload |= ui.button("reload (F5)").clicked();
+                ui.menu_button(s.file, |ui| {
+                    action_open |= ui.button(s.open).clicked();
+                    action_reload |= ui.button(s.reload).clicked();
                 });
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    ui.label(
-                        RichText::new("read-only console — edit in the WPF app")
-                            .color(AMBER)
-                            .small(),
-                    );
+                    ui.label(RichText::new(s.readonly_banner).color(AMBER).small());
                 });
             });
         });
@@ -259,6 +454,9 @@ impl eframe::App for ConsoleApp {
 
         if let Some(selected_id) = self.selected_id.clone() {
             if let Some(rule) = self.rules.iter().find(|r| r.id == selected_id).cloned() {
+                let errors = explain_localized(&rule, std::ptr::eq(self.s, &ZH));
+                let zh = std::ptr::eq(self.s, &ZH);
+                let _ = zh;
                 egui::TopBottomPanel::bottom("detail")
                     .frame(
                         egui::Frame::default()
@@ -268,51 +466,63 @@ impl eframe::App for ConsoleApp {
                     )
                     .show(ctx, |ui| {
                         ui.horizontal(|ui| {
-                            ui.label(RichText::new("detail").strong().color(ACCENT));
+                            ui.label(RichText::new(s.detail).strong().color(ACCENT));
                             ui.separator();
                             ui.label(RichText::new(&rule.exe_name).strong());
-                            if let Some(note) = (!rule.note.trim().is_empty())
-                                .then(|| format!("note: {}", rule.note.trim()))
-                            {
-                                ui.label(RichText::new(note).color(MUTED).small());
+                            if !rule.note.trim().is_empty() {
+                                ui.label(
+                                    RichText::new(format!("{}{}", s.note_prefix, rule.note.trim()))
+                                        .color(MUTED)
+                                        .small(),
+                                );
                             }
                         });
                         ui.add_space(4.0);
+                        let dash = s.dash;
                         egui::Grid::new("detail-grid").num_columns(2).spacing([24.0, 4.0]).show(ui, |ui| {
-                            ui.label(RichText::new("id").color(MUTED).small());
+                            ui.label(RichText::new(s.label_id).color(MUTED).small());
                             ui.label(RichText::new(&rule.id).small());
                             ui.end_row();
-                            ui.label(RichText::new("path").color(MUTED).small());
-                            ui.label(RichText::new(if rule.exe_path.is_empty() { "—" } else { &rule.exe_path }).small());
+                            ui.label(RichText::new(s.label_path).color(MUTED).small());
+                            ui.label(
+                                RichText::new(if rule.exe_path.is_empty() { dash } else { &rule.exe_path }).small(),
+                            );
                             ui.end_row();
-                            ui.label(RichText::new("mode / status / priority").color(MUTED).small());
+                            ui.label(RichText::new(s.label_msp).color(MUTED).small());
                             ui.label(
                                 RichText::new(format!(
                                     "{} / {} / {}",
-                                    rule.mode.name(),
-                                    if rule.is_enabled { "enabled" } else { "disabled" },
+                                    Self::mode_label(rule.mode, s),
+                                    if rule.is_enabled { s.enabled } else { s.disabled },
                                     rule.priority
                                 ))
                                 .color(Self::mode_color(rule.mode))
                                 .small(),
                             );
                             ui.end_row();
-                            ui.label(RichText::new("hosts").color(MUTED).small());
-                            ui.label(RichText::new(if rule.target_hosts.is_empty() { "—" } else { &rule.target_hosts }).small());
+                            ui.label(RichText::new(s.label_hosts).color(MUTED).small());
+                            ui.label(
+                                RichText::new(if rule.target_hosts.is_empty() { dash } else { &rule.target_hosts })
+                                    .small(),
+                            );
                             ui.end_row();
-                            ui.label(RichText::new("ip / cidr").color(MUTED).small());
-                            ui.label(RichText::new(if rule.target_ips.is_empty() { "—" } else { &rule.target_ips }).small());
+                            ui.label(RichText::new(s.label_ips).color(MUTED).small());
+                            ui.label(
+                                RichText::new(if rule.target_ips.is_empty() { dash } else { &rule.target_ips }).small(),
+                            );
                             ui.end_row();
-                            ui.label(RichText::new("ports").color(MUTED).small());
-                            ui.label(RichText::new(if rule.target_ports.is_empty() { "—" } else { &rule.target_ports }).small());
+                            ui.label(RichText::new(s.label_ports).color(MUTED).small());
+                            ui.label(
+                                RichText::new(if rule.target_ports.is_empty() { dash } else { &rule.target_ports })
+                                    .small(),
+                            );
                             ui.end_row();
                         });
-                        let errors = Self::validation_errors(&rule);
                         if errors.is_empty() {
-                            ui.label(RichText::new("constraints: valid").color(GREEN).small());
+                            ui.label(RichText::new(s.valid).color(GREEN).small());
                         } else {
                             ui.label(
-                                RichText::new(format!("constraints invalid: {}", errors.join(", ")))
+                                RichText::new(format!("{}{}", s.invalid_prefix, errors.join(", ")))
                                     .color(RED)
                                     .small(),
                             );
@@ -324,40 +534,36 @@ impl eframe::App for ConsoleApp {
         egui::CentralPanel::default().show(ctx, |ui| {
             ui.horizontal(|ui| {
                 let search_before = self.search.clone();
-                ui.label("filter");
+                ui.label(s.filter);
                 egui::TextEdit::singleline(&mut self.search)
                     .desired_width(260.0)
-                    .hint_text("process / hosts / note")
+                    .hint_text(s.filter_hint)
                     .show(ui);
                 if self.search != search_before {
                     self.rebuild_view();
                 }
                 ui.separator();
-                if ui
-                    .button(format!("reload"))
-                    .clicked()
-                {
+                if ui.button(s.reload_short).clicked() {
                     action_reload = true;
                 }
             });
             ui.add_space(6.0);
 
-            // Header row + click-to-sort, matching the WPF column set.
             ui.horizontal(|ui| {
                 for (key, width) in [
-                    (SortKey::Canonical, 34.0),
-                    (SortKey::Process, 190.0),
-                    (SortKey::Mode, 64.0),
-                    (SortKey::Enabled, 72.0),
+                    (SortKey::Canonical, 44.0),
+                    (SortKey::Process, 130.0),
+                    (SortKey::Mode, 56.0),
+                    (SortKey::Enabled, 64.0),
                     (SortKey::Priority, 58.0),
-                    (SortKey::Created, 110.0),
+                    (SortKey::Created, 96.0),
                 ] {
                     let arrow = if self.sort_key == key {
                         if self.sort_descending { " ▼" } else { " ▲" }
                     } else {
                         ""
                     };
-                    let label = RichText::new(format!("{}{}", key.label(), arrow)).color(MUTED);
+                    let label = RichText::new(format!("{}{}", key.label(s), arrow)).color(MUTED);
                     if ui
                         .add_sized([width, 18.0], egui::Button::new(label).small())
                         .clicked()
@@ -372,27 +578,22 @@ impl eframe::App for ConsoleApp {
                     }
                     ui.add_space(12.0);
                 }
-                ui.label(RichText::new("constraints").color(MUTED).small());
+                ui.label(RichText::new(s.col_constraints).color(MUTED).small());
             });
             ui.separator();
 
             if self.config.is_none() {
                 ui.add_space(24.0);
-                ui.label(
-                    RichText::new(
-                        "no configuration loaded — Ctrl+O opens a config.json, or launch from %APPDATA%\\IntentRouteAI",
-                    )
-                    .color(MUTED),
-                );
+                ui.label(RichText::new(s.no_config).color(MUTED));
             } else if self.view.is_empty() {
                 ui.add_space(24.0);
-                ui.label(RichText::new("no rules match the filter").color(MUTED));
+                ui.label(RichText::new(s.no_match).color(MUTED));
             } else {
                 egui::ScrollArea::vertical().show(ui, |ui| {
                     for (row, &index) in self.view.iter().enumerate() {
                         let rule = &self.rules[index];
                         let selected = self.selected_id.as_deref() == Some(rule.id.as_str());
-                        let errors = Self::validation_errors(rule);
+                        let errors = explain_localized(rule, std::ptr::eq(self.s, &ZH));
                         let row_background = if selected {
                             Color32::from_rgb(0x26, 0x4C, 0x8D)
                         } else {
@@ -420,29 +621,31 @@ impl eframe::App for ConsoleApp {
                                             .truncate(),
                                     );
                                     ui.add_sized(
-                                        [64.0, 16.0],
+                                        [56.0, 16.0],
                                         egui::Label::new(
-                                            RichText::new(rule.mode.name())
+                                            RichText::new(Self::mode_label(rule.mode, s))
                                                 .color(Self::mode_color(rule.mode))
                                                 .strong(),
                                         )
                                         .selectable(false),
                                     );
                                     ui.add_sized(
-                                        [72.0, 16.0],
+                                        [64.0, 16.0],
                                         egui::Label::new(
-                                            RichText::new(if rule.is_enabled { "enabled" } else { "disabled" })
+                                            RichText::new(if rule.is_enabled { s.enabled } else { s.disabled })
                                                 .color(if rule.is_enabled { GREEN } else { MUTED }),
                                         )
                                         .selectable(false),
                                     );
                                     ui.add_sized(
                                         [58.0, 16.0],
-                                        egui::Label::new(RichText::new(format!("{}", rule.priority)).color(MUTED))
-                                            .selectable(false),
+                                        egui::Label::new(
+                                            RichText::new(format!("{}", rule.priority)).color(MUTED),
+                                        )
+                                        .selectable(false),
                                     );
                                     ui.add_sized(
-                                        [110.0, 16.0],
+                                        [96.0, 16.0],
                                         egui::Label::new(RichText::new(&rule.created_at).color(MUTED).small())
                                             .selectable(false),
                                     );
@@ -456,14 +659,13 @@ impl eframe::App for ConsoleApp {
                                         .selectable(false),
                                     );
                                     ui.label(
-                                        RichText::new(Self::condition_summary(rule))
+                                        RichText::new(Self::condition_summary(rule, s))
                                             .color(MUTED)
                                             .small(),
                                     );
                                 });
                             })
                             .response;
-                        // The frame contents are labels; sense the whole frame for clicks.
                         let clicked = response.interact(Sense::click()).clicked();
                         if clicked {
                             self.selected_id = Some(rule.id.clone());
@@ -503,15 +705,23 @@ impl eframe::App for ConsoleApp {
 }
 
 fn main() -> eframe::Result<()> {
+    let zh = resolve_language();
+    let title = if zh { ZH.title } else { EN.title };
     let options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()
             .with_inner_size([1100.0, 720.0])
-            .with_min_inner_size([860.0, 560.0]),
+            .with_min_inner_size([860.0, 560.0])
+            .with_title(title),
         ..Default::default()
     };
     eframe::run_native(
-        "IntentRoute AI — rules console (read-only)",
+        title,
         options,
-        Box::new(|_cc| Ok(Box::new(ConsoleApp::new()))),
+        Box::new(move |cc| {
+            if zh {
+                install_cjk_font(&cc.egui_ctx);
+            }
+            Ok(Box::new(ConsoleApp::new(zh)))
+        }),
     )
 }
