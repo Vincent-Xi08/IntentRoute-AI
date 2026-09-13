@@ -1,11 +1,18 @@
-//! intentroute-gui — read-only rules console (Rust migration, phase 3a+3b).
+//! intentroute-gui — rules console (Rust migration, phase 3a–3c).
 //!
 //! A pure-Rust eframe/egui shell over the shared `intentroute-core`: loads the
 //! real product configuration (strict UTF-8, schema-checked), shows rules in
 //! Canonical Runtime Order with search, column sorting, constraint-validation
-//! flags, and a detail panel. It deliberately **never writes** configuration —
-//! editing (and the DPAPI password boundary it implies) stays in the WPF app
-//! until the Rust shell proves parity.
+//! flags, and a detail panel.
+//!
+//! Phase 3c GUI slice — bounded editing: the detail panel can toggle a rule's
+//! enabled state and set its mode (proxy/direct/block). Every edit runs one
+//! load→commit transaction through the core `workspace` engine while holding
+//! the `sing-box.runtime.lock` management lock, so a running WPF instance
+//! blocks the edit (and vice versa) instead of racing on `config.json`. The
+//! engine validates the complete candidate and never leaves memory or disk
+//! half-written; passwords stay DPAPI-protected at rest. No other fields are
+//! editable from this shell yet.
 //!
 //! Phase 3b — Chinese UI parity: a CJK system font (Microsoft YaHei → SimHei →
 //! SimSun) is loaded at runtime so Chinese renders correctly; nothing is
@@ -17,7 +24,10 @@
 
 use eframe::egui;
 use egui::{Color32, RichText, Sense};
-use intentroute_core::{canonical_order, constraint, AppConfig, ProxyMode, ProxyRule};
+use intentroute_core::runtime_lock::with_management_lock;
+use intentroute_core::{
+    canonical_order, constraint, AppConfig, LoadStatus, ProxyMode, ProxyRule, Workspace,
+};
 use std::path::PathBuf;
 
 // Product palette (README "dark professional" tokens).
@@ -71,6 +81,20 @@ struct UiStrings {
     status_failed: &'static str,
     status_loaded_fmt: &'static str, // {path} {count}
     dash: &'static str,
+    // Phase 3c edit strings
+    banner_edit: &'static str,
+    edit_group: &'static str,
+    toggle_enabled: &'static str,
+    set_proxy: &'static str,
+    set_direct: &'static str,
+    set_block: &'static str,
+    confirm_title: &'static str,
+    confirm_toggle_fmt: &'static str, // {rule} {state}
+    confirm_mode_fmt: &'static str,   // {rule} {mode}
+    confirm_ok: &'static str,
+    confirm_cancel: &'static str,
+    edit_saved_fmt: &'static str,     // {count}
+    edit_blocked_hint: &'static str,
 }
 
 const ZH: UiStrings = UiStrings {
@@ -111,6 +135,19 @@ const ZH: UiStrings = UiStrings {
     status_failed: "加载失败",
     status_loaded_fmt: "已加载 {path} —— {count} 条规则",
     dash: "—",
+    banner_edit: "编辑通过原子事务写入 —— WPF 实例运行时将被锁定阻止",
+    edit_group: "编辑（原子写入）",
+    toggle_enabled: "切换启用状态",
+    set_proxy: "设为代理",
+    set_direct: "设为直连",
+    set_block: "设为阻止",
+    confirm_title: "确认编辑",
+    confirm_toggle_fmt: "将规则 {rule} 的启用状态切换为 {state}？",
+    confirm_mode_fmt: "将规则 {rule} 的模式设为 {mode}？",
+    confirm_ok: "确认",
+    confirm_cancel: "取消",
+    edit_saved_fmt: "编辑已提交 —— {count} 条规则",
+    edit_blocked_hint: "另一个 IntentRoute AI 实例正在管理此目录，编辑被阻止。",
 };
 
 const EN: UiStrings = UiStrings {
@@ -151,6 +188,19 @@ const EN: UiStrings = UiStrings {
     status_failed: "load failed",
     status_loaded_fmt: "loaded {path} — {count} rule(s)",
     dash: "—",
+    banner_edit: "edits commit atomically — blocked while a WPF instance runs",
+    edit_group: "edit (atomic commit)",
+    toggle_enabled: "toggle enabled",
+    set_proxy: "set proxy",
+    set_direct: "set direct",
+    set_block: "set block",
+    confirm_title: "confirm edit",
+    confirm_toggle_fmt: "toggle rule {rule} enabled state to {state}?",
+    confirm_mode_fmt: "set rule {rule} mode to {mode}?",
+    confirm_ok: "confirm",
+    confirm_cancel: "cancel",
+    edit_saved_fmt: "edit committed — {count} rule(s)",
+    edit_blocked_hint: "Another IntentRoute AI instance is managing this directory; the edit was blocked.",
 };
 
 /// Constraint error names from the core are English; map to Chinese for the
@@ -289,6 +339,14 @@ struct ConsoleApp {
     selected_id: Option<String>,
     error: Option<String>,
     status: String,
+    pending_edit: Option<PendingEdit>,
+}
+
+/// One confirmed edit intention; performed under the management lock.
+#[derive(Clone)]
+enum PendingEdit {
+    ToggleEnabled { rule_id: String },
+    SetMode { rule_id: String, mode: ProxyMode },
 }
 
 impl ConsoleApp {
@@ -306,6 +364,7 @@ impl ConsoleApp {
             selected_id: None,
             error: None,
             status: s.status_none.to_string(),
+            pending_edit: None,
         };
         if let Some(appdata) = std::env::var_os("APPDATA") {
             let default = PathBuf::from(appdata).join("IntentRouteAI").join("config.json");
@@ -411,6 +470,60 @@ impl ConsoleApp {
             parts.join(" | ")
         }
     }
+
+    /// Performs the confirmed edit: hold the management lock, load the fresh
+    /// on-disk configuration, apply the mutation through the transactional
+    /// workspace engine, and adopt the published snapshot. A held lock (WPF
+    /// running) surfaces the localized block message.
+    fn perform_edit(&mut self, edit: &PendingEdit) {
+        let Some(path) = self.config_path.clone() else {
+            self.error = Some(self.s.status_none.to_string());
+            return;
+        };
+        let directory = path.parent().map(PathBuf::from).unwrap_or_default();
+        let s = self.s;
+
+        let outcome = with_management_lock(&directory, || {
+            let mut workspace = match Workspace::load(&path) {
+                LoadStatus::Loaded(workspace) => *workspace,
+                LoadStatus::Missing => return Err(s.status_failed.to_string()),
+                LoadStatus::Unusable(_, reason) => return Err(reason),
+            };
+            workspace.commit(|candidate| match edit {
+                PendingEdit::ToggleEnabled { rule_id } => {
+                    if let Some(rule) = candidate.rules.iter_mut().find(|r| &r.id == rule_id) {
+                        rule.is_enabled = !rule.is_enabled;
+                    }
+                }
+                PendingEdit::SetMode { rule_id, mode } => {
+                    if let Some(rule) = candidate.rules.iter_mut().find(|r| &r.id == rule_id) {
+                        rule.mode = *mode;
+                    }
+                }
+            })
+        });
+
+        match outcome {
+            Ok(published) => {
+                self.error = None;
+                self.status = s
+                    .edit_saved_fmt
+                    .replace("{count}", &published.rules.len().to_string());
+                self.rules = published.rules.clone();
+                self.config = Some(published);
+                self.rebuild_view();
+            }
+            Err(reason) => {
+                let blocked = reason.contains("already managing");
+                self.error = Some(if blocked {
+                    s.edit_blocked_hint.to_string()
+                } else {
+                    reason
+                });
+                self.status = s.status_failed.to_string();
+            }
+        }
+    }
 }
 
 impl eframe::App for ConsoleApp {
@@ -435,7 +548,7 @@ impl eframe::App for ConsoleApp {
                     action_reload |= ui.button(s.reload).clicked();
                 });
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    ui.label(RichText::new(s.readonly_banner).color(AMBER).small());
+                    ui.label(RichText::new(s.banner_edit).color(AMBER).small());
                 });
             });
         });
@@ -452,11 +565,10 @@ impl eframe::App for ConsoleApp {
                 });
             });
 
+        let mut requested_edit: Option<PendingEdit> = None;
         if let Some(selected_id) = self.selected_id.clone() {
             if let Some(rule) = self.rules.iter().find(|r| r.id == selected_id).cloned() {
                 let errors = explain_localized(&rule, std::ptr::eq(self.s, &ZH));
-                let zh = std::ptr::eq(self.s, &ZH);
-                let _ = zh;
                 egui::TopBottomPanel::bottom("detail")
                     .frame(
                         egui::Frame::default()
@@ -527,7 +639,33 @@ impl eframe::App for ConsoleApp {
                                     .small(),
                             );
                         }
+                        ui.add_space(6.0);
+                        ui.separator();
+                        ui.label(RichText::new(s.edit_group).strong().color(ACCENT).small());
+                        ui.add_space(4.0);
+                        ui.horizontal(|ui| {
+                            if ui.button(s.toggle_enabled).clicked() {
+                                requested_edit = Some(PendingEdit::ToggleEnabled {
+                                    rule_id: rule.id.clone(),
+                                });
+                            }
+                            for (label, mode) in [
+                                (s.set_proxy, ProxyMode::Proxy),
+                                (s.set_direct, ProxyMode::Direct),
+                                (s.set_block, ProxyMode::Block),
+                            ] {
+                                if ui.button(label).clicked() {
+                                    requested_edit = Some(PendingEdit::SetMode {
+                                        rule_id: rule.id.clone(),
+                                        mode,
+                                    });
+                                }
+                            }
+                        });
                     });
+            }
+            if let Some(edit) = requested_edit {
+                self.pending_edit = Some(edit);
             }
         }
 
@@ -686,6 +824,56 @@ impl eframe::App for ConsoleApp {
         }
         if action_reload {
             self.reload();
+        }
+
+        // Edit confirmation dialog (phase 3c): plain-text intention shown
+        // before any write path runs.
+        let mut confirmed = false;
+        let mut cancelled = false;
+        if let Some(edit) = self.pending_edit.clone() {
+            let message = match &edit {
+                PendingEdit::ToggleEnabled { rule_id } => {
+                    let Some(rule) = self.rules.iter().find(|r| &r.id == rule_id) else {
+                        self.pending_edit = None;
+                        return;
+                    };
+                    let next_state = if rule.is_enabled { s.disabled } else { s.enabled };
+                    s.confirm_toggle_fmt
+                        .replace("{rule}", &rule.exe_name)
+                        .replace("{state}", next_state)
+                }
+                PendingEdit::SetMode { rule_id, mode } => {
+                    let Some(rule) = self.rules.iter().find(|r| &r.id == rule_id) else {
+                        self.pending_edit = None;
+                        return;
+                    };
+                    s.confirm_mode_fmt
+                        .replace("{rule}", &rule.exe_name)
+                        .replace("{mode}", Self::mode_label(*mode, s))
+                }
+            };
+            egui::Window::new(s.confirm_title)
+                .collapsible(false)
+                .resizable(false)
+                .anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0])
+                .show(ctx, |ui| {
+                    ui.label(message);
+                    ui.add_space(8.0);
+                    ui.horizontal(|ui| {
+                        if ui.button(s.confirm_ok).clicked() {
+                            confirmed = true;
+                        }
+                        if ui.button(s.confirm_cancel).clicked() {
+                            cancelled = true;
+                        }
+                    });
+                });
+            if confirmed {
+                self.pending_edit = None;
+                self.perform_edit(&edit);
+            } else if cancelled {
+                self.pending_edit = None;
+            }
         }
 
         ctx.input_mut(|input| {

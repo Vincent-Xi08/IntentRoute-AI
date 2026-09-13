@@ -18,6 +18,9 @@
 //!   (phase 3c engine): DPAPI `"dpapi:"` envelopes and clone→mutate→
 //!   normalize→validate→atomic-replace commits that leave memory and disk
 //!   unchanged on any failure.
+//! - [`runtime_lock`] — the `sing-box.runtime.lock` management-lock interop:
+//!   Rust write paths hold the same exclusive lock as the WPF application
+//!   for one load→commit transaction, preventing concurrent editors.
 
 pub mod builder;
 pub mod config;
@@ -26,6 +29,7 @@ pub mod dpapi;
 pub mod identity;
 pub mod import_plan;
 pub mod local_endpoint;
+pub mod runtime_lock;
 pub mod runtime_order;
 pub mod rule;
 pub mod workspace;
