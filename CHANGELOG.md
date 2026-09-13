@@ -4,6 +4,12 @@ All notable changes are documented here. The project follows semantic versioning
 
 ## [Unreleased]
 
+## [0.27.0] - 2026-09-13
+
+### Changed
+
+- The rules-page and process-page search boxes now debounce filtering by 300ms, the same treatment the runtime-log search already had. The process search previously LINQ-filtered the ~900-row snapshot and reassigned the whole `ItemsSource` (resetting virtualization, selection, and scroll) on every keystroke, which made typing visibly stutter; the rules search rebuilt its view per keystroke the same way. Both now apply the filter once, 300ms after the last keystroke, and the debounce timers are stopped on shutdown alongside the log-search timer.
+
 ## [0.26.0] - 2026-09-13
 
 ### Changed

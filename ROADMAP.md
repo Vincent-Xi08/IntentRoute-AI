@@ -159,6 +159,10 @@ The roadmap is evidence-driven. Items move forward when implementation, tests, a
 - [x] DWM immersive-dark-mode title bar applied to the constraints editor, import preview, and themed message box (silent fallback on older Windows)
 - [x] Rule-constraints editor opened end-to-end for the first time since v0.13: dark chrome, complete form, clean close, no crash — live confirmation of the v0.25 entrance fix
 
+## v0.27 — search debounce parity (2026-09-13)
+
+- [x] 300ms debounce on the rules and process search boxes, matching the log search; the process search no longer rebuilds the ~900-row ItemsSource per keystroke
+
 ## Candidate next work
 
 - [x] Guided sing-box discovery with version reporting

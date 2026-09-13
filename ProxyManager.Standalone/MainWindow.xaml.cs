@@ -46,6 +46,8 @@ public partial class MainWindow : Window
     private AiRuleValidationResult? _currentAiValidation;
     private System.Windows.Threading.DispatcherTimer? _draftRevalidationTimer;
     private readonly System.Windows.Threading.DispatcherTimer _logSearchDebounce = new() { Interval = TimeSpan.FromMilliseconds(300) };
+    private readonly System.Windows.Threading.DispatcherTimer _rulesSearchDebounce = new() { Interval = TimeSpan.FromMilliseconds(300) };
+    private readonly System.Windows.Threading.DispatcherTimer _processSearchDebounce = new() { Interval = TimeSpan.FromMilliseconds(300) };
     private ICollectionView? _logsView;
     private string _logSearchText = string.Empty;
     private bool _languageUiLoading;
@@ -102,6 +104,8 @@ public partial class MainWindow : Window
         };
         LogLevelFilterCombo.SelectedIndex = 0;
         _logSearchDebounce.Tick += LogSearchDebounce_Tick;
+        _rulesSearchDebounce.Tick += RulesSearchDebounce_Tick;
+        _processSearchDebounce.Tick += ProcessSearchDebounce_Tick;
 
         // 允许标题栏拖动
         MouseLeftButtonDown += (s, e) => { if (e.ChangedButton == MouseButton.Left) DragMove(); };
@@ -1161,6 +1165,14 @@ public partial class MainWindow : Window
 
     private void Search_Changed(object sender, TextChangedEventArgs e)
     {
+        // 与日志搜索同一 300ms 防抖：避免每敲一个字符就重建一次规则视图。
+        _rulesSearchDebounce.Stop();
+        _rulesSearchDebounce.Start();
+    }
+
+    private void RulesSearchDebounce_Tick(object? sender, EventArgs e)
+    {
+        _rulesSearchDebounce.Stop();
         _searchFilter = SearchBox.Text;
         ApplyFilter();
     }
@@ -1616,6 +1628,14 @@ public partial class MainWindow : Window
 
     private void ProcessSearch_Changed(object sender, TextChangedEventArgs e)
     {
+        // 进程快照近千行：每键全量重设 ItemsSource 会明显卡顿，与日志搜索共用 300ms 防抖。
+        _processSearchDebounce.Stop();
+        _processSearchDebounce.Start();
+    }
+
+    private void ProcessSearchDebounce_Tick(object? sender, EventArgs e)
+    {
+        _processSearchDebounce.Stop();
         _processSearchFilter = ProcessSearchBox.Text;
         ApplyProcessFilter();
     }
@@ -2083,6 +2103,8 @@ public partial class MainWindow : Window
         _draftRevalidationTimer?.Stop();
         _draftRevalidationTimer = null;
         _logSearchDebounce.Stop();
+        _rulesSearchDebounce.Stop();
+        _processSearchDebounce.Stop();
         _aiModelRefreshVersion++;
         _policyModelRefreshVersion++;
         _policyAnalysisVersion++;
