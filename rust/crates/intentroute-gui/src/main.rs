@@ -93,8 +93,18 @@ struct UiStrings {
     confirm_mode_fmt: &'static str,   // {rule} {mode}
     confirm_ok: &'static str,
     confirm_cancel: &'static str,
-    edit_saved_fmt: &'static str,     // {count}
+    edit_saved_fmt: &'static str, // {count}
     edit_blocked_hint: &'static str,
+    // Constraints editor (parity slice)
+    edit_constraints: &'static str,
+    constraints_title: &'static str,
+    constraints_hosts: &'static str,
+    constraints_ips: &'static str,
+    constraints_ports: &'static str,
+    constraints_protocol: &'static str,
+    constraints_protocol_any: &'static str,
+    constraints_save: &'static str,
+    constraints_invalid: &'static str,
 }
 
 const ZH: UiStrings = UiStrings {
@@ -148,6 +158,15 @@ const ZH: UiStrings = UiStrings {
     confirm_cancel: "取消",
     edit_saved_fmt: "编辑已提交 —— {count} 条规则",
     edit_blocked_hint: "另一个 IntentRoute AI 实例正在管理此目录，编辑被阻止。",
+    edit_constraints: "编辑约束",
+    constraints_title: "编辑约束（原子写入）",
+    constraints_hosts: "域名约束",
+    constraints_ips: "IP / CIDR 约束",
+    constraints_ports: "端口约束",
+    constraints_protocol: "协议",
+    constraints_protocol_any: "不限",
+    constraints_save: "保存",
+    constraints_invalid: "约束格式无效，修正后才能保存",
 };
 
 const EN: UiStrings = UiStrings {
@@ -201,6 +220,15 @@ const EN: UiStrings = UiStrings {
     confirm_cancel: "cancel",
     edit_saved_fmt: "edit committed — {count} rule(s)",
     edit_blocked_hint: "Another IntentRoute AI instance is managing this directory; the edit was blocked.",
+    edit_constraints: "edit constraints",
+    constraints_title: "edit constraints (atomic commit)",
+    constraints_hosts: "hosts",
+    constraints_ips: "ip / cidr",
+    constraints_ports: "ports",
+    constraints_protocol: "protocol",
+    constraints_protocol_any: "any",
+    constraints_save: "save",
+    constraints_invalid: "invalid constraint format — fix before saving",
 };
 
 /// Constraint error names from the core are English; map to Chinese for the
@@ -340,6 +368,7 @@ struct ConsoleApp {
     error: Option<String>,
     status: String,
     pending_edit: Option<PendingEdit>,
+    constraints_draft: Option<ConstraintsDraft>,
 }
 
 /// One confirmed edit intention; performed under the management lock.
@@ -347,6 +376,25 @@ struct ConsoleApp {
 enum PendingEdit {
     ToggleEnabled { rule_id: String },
     SetMode { rule_id: String, mode: ProxyMode },
+    /// Constraints editor: hosts / IPs / ports / protocol, pre-validated in
+    /// the dialog and re-validated by the engine inside the transaction.
+    UpdateConstraints {
+        rule_id: String,
+        hosts: String,
+        ips: String,
+        ports: String,
+        protocol: String,
+    },
+}
+
+/// Editing buffer for the constraints dialog (phase parity slice).
+#[derive(Clone)]
+struct ConstraintsDraft {
+    rule_id: String,
+    hosts: String,
+    ips: String,
+    ports: String,
+    protocol: usize, // index into the fixed protocol list
 }
 
 impl ConsoleApp {
@@ -365,6 +413,7 @@ impl ConsoleApp {
             error: None,
             status: s.status_none.to_string(),
             pending_edit: None,
+            constraints_draft: None,
         };
         if let Some(appdata) = std::env::var_os("APPDATA") {
             let default = PathBuf::from(appdata).join("IntentRouteAI").join("config.json");
@@ -500,6 +549,20 @@ impl ConsoleApp {
                         rule.mode = *mode;
                     }
                 }
+                PendingEdit::UpdateConstraints {
+                    rule_id,
+                    hosts,
+                    ips,
+                    ports,
+                    protocol,
+                } => {
+                    if let Some(rule) = candidate.rules.iter_mut().find(|r| &r.id == rule_id) {
+                        rule.target_hosts = hosts.clone();
+                        rule.target_ips = ips.clone();
+                        rule.target_ports = ports.clone();
+                        rule.protocol = protocol.clone();
+                    }
+                }
             })
         });
 
@@ -523,6 +586,35 @@ impl ConsoleApp {
                 self.status = s.status_failed.to_string();
             }
         }
+    }
+}
+
+/// Fixed protocol list for the constraints combo; "" = unrestricted, matching
+/// the WPF editor's ordering (any / TCP / UDP / Both).
+fn protocol_list(s: &UiStrings) -> [String; 4] {
+    [
+        s.constraints_protocol_any.to_string(),
+        "TCP".to_string(),
+        "UDP".to_string(),
+        "Both".to_string(),
+    ]
+}
+
+fn protocol_index(stored: &str) -> usize {
+    match stored.trim().to_ascii_uppercase().as_str() {
+        "TCP" => 1,
+        "UDP" => 2,
+        "BOTH" => 3,
+        _ => 0,
+    }
+}
+
+fn protocol_stored(index: usize) -> &'static str {
+    match index {
+        1 => "TCP",
+        2 => "UDP",
+        3 => "Both",
+        _ => "",
     }
 }
 
@@ -566,6 +658,7 @@ impl eframe::App for ConsoleApp {
             });
 
         let mut requested_edit: Option<PendingEdit> = None;
+        let mut open_constraints: Option<String> = None;
         if let Some(selected_id) = self.selected_id.clone() {
             if let Some(rule) = self.rules.iter().find(|r| r.id == selected_id).cloned() {
                 let errors = explain_localized(&rule, std::ptr::eq(self.s, &ZH));
@@ -661,11 +754,25 @@ impl eframe::App for ConsoleApp {
                                     });
                                 }
                             }
+                            if ui.button(s.edit_constraints).clicked() {
+                                open_constraints = Some(rule.id.clone());
+                            }
                         });
                     });
             }
             if let Some(edit) = requested_edit {
                 self.pending_edit = Some(edit);
+            }
+            if let Some(rule_id) = open_constraints {
+                if let Some(rule) = self.rules.iter().find(|r| r.id == rule_id) {
+                    self.constraints_draft = Some(ConstraintsDraft {
+                        rule_id: rule.id.clone(),
+                        hosts: rule.target_hosts.clone(),
+                        ips: rule.target_ips.clone(),
+                        ports: rule.target_ports.clone(),
+                        protocol: protocol_index(&rule.protocol),
+                    });
+                }
             }
         }
 
@@ -831,6 +938,9 @@ impl eframe::App for ConsoleApp {
         let mut confirmed = false;
         let mut cancelled = false;
         if let Some(edit) = self.pending_edit.clone() {
+            // Constraints edits skip the generic dialog: the editor window with
+            // its live validation and gated Save was the confirmation.
+            let needs_dialog = !matches!(edit, PendingEdit::UpdateConstraints { .. });
             let message = match &edit {
                 PendingEdit::ToggleEnabled { rule_id } => {
                     let Some(rule) = self.rules.iter().find(|r| &r.id == rule_id) else {
@@ -851,7 +961,13 @@ impl eframe::App for ConsoleApp {
                         .replace("{rule}", &rule.exe_name)
                         .replace("{mode}", Self::mode_label(*mode, s))
                 }
+                PendingEdit::UpdateConstraints { .. } => String::new(),
             };
+            if !needs_dialog {
+                let edit = self.pending_edit.take().unwrap();
+                self.perform_edit(&edit);
+                return;
+            }
             egui::Window::new(s.confirm_title)
                 .collapsible(false)
                 .resizable(false)
@@ -873,6 +989,97 @@ impl eframe::App for ConsoleApp {
                 self.perform_edit(&edit);
             } else if cancelled {
                 self.pending_edit = None;
+            }
+        }
+
+        // Constraints editor dialog: live validation with the shared core
+        // validator; Save is disabled until every field parses (the same gate
+        // as the WPF RuleEditWindow), then routes through the confirmed-edit
+        // path with its own lock→commit transaction.
+        if let Some(draft) = self.constraints_draft.clone() {
+            let mut close = false;
+            let mut save_requested = false;
+            let protocols = protocol_list(s);
+            let valid = constraint::explain(&draft.hosts, &draft.ips, &draft.ports).is_empty();
+            egui::Window::new(s.constraints_title)
+                .collapsible(false)
+                .resizable(false)
+                .anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0])
+                .show(ctx, |ui| {
+                    egui::Grid::new("constraints-grid")
+                        .num_columns(2)
+                        .spacing([16.0, 6.0])
+                        .show(ui, |ui| {
+                            let draft = &mut self.constraints_draft.as_mut().unwrap();
+                            ui.label(s.constraints_hosts);
+                            ui.add(egui::TextEdit::singleline(&mut draft.hosts).desired_width(320.0));
+                            ui.end_row();
+                            ui.label(s.constraints_ips);
+                            ui.add(egui::TextEdit::singleline(&mut draft.ips).desired_width(320.0));
+                            ui.end_row();
+                            ui.label(s.constraints_ports);
+                            ui.add(egui::TextEdit::singleline(&mut draft.ports).desired_width(320.0));
+                            ui.end_row();
+                            ui.label(s.constraints_protocol);
+                            let selected = draft.protocol;
+                            egui::ComboBox::new("constraints-protocol", "")
+                                .selected_text(&protocols[selected])
+                                .show_ui(ui, |ui| {
+                                    for (index, label) in protocols.iter().enumerate() {
+                                        ui.selectable_value(
+                                            &mut self.constraints_draft.as_mut().unwrap().protocol,
+                                            index,
+                                            label,
+                                        );
+                                    }
+                                    let _ = selected;
+                                });
+                            ui.end_row();
+                        });
+                    let draft_for_errors = self.constraints_draft.clone().unwrap();
+                    let localized: Vec<&'static str> = explain_localized(
+                        &ProxyRule {
+                            target_hosts: draft_for_errors.hosts.clone(),
+                            target_ips: draft_for_errors.ips.clone(),
+                            target_ports: draft_for_errors.ports.clone(),
+                            ..ProxyRule::new(&draft_for_errors.rule_id, "")
+                        },
+                        std::ptr::eq(self.s, &ZH),
+                    );
+                    if !localized.is_empty() {
+                        ui.label(
+                            RichText::new(format!("{}: {}", s.constraints_invalid, localized.join(", ")))
+                                .color(RED)
+                                .small(),
+                        );
+                    }
+                    ui.add_space(8.0);
+                    ui.horizontal(|ui| {
+                        if ui.button(s.confirm_cancel).clicked() {
+                            close = true;
+                        }
+                        let save = ui.add_enabled(valid, egui::Button::new(s.constraints_save));
+                        if save.clicked() {
+                            save_requested = true;
+                        }
+                    });
+                });
+            if close {
+                self.constraints_draft = None;
+            }
+            if save_requested {
+                let draft = self.constraints_draft.take().unwrap();
+                self.pending_edit = Some(PendingEdit::UpdateConstraints {
+                    rule_id: draft.rule_id,
+                    hosts: draft.hosts.trim().to_string(),
+                    ips: draft.ips.trim().to_string(),
+                    ports: draft.ports.trim().to_string(),
+                    protocol: protocol_stored(draft.protocol).to_string(),
+                });
+                // Perform immediately: the dialog itself was the confirmation.
+                if let Some(edit) = self.pending_edit.take() {
+                    self.perform_edit(&edit);
+                }
             }
         }
 

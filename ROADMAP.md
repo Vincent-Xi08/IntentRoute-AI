@@ -188,7 +188,8 @@ The roadmap is evidence-driven. Items move forward when implementation, tests, a
 - [x] Phase 3b (2026-09-13): Chinese UI parity — runtime-loaded CJK system font (msyh/simhei/simsun, nothing bundled), language follows font availability with an English fallback and an `INTENTROUTE_GUI_LANG` override; all shell strings localized in-crate
 - [x] Phase 3c engine slice (2026-09-13): `dpapi` + `workspace` in the Rust core — DPAPI envelope parity and the full transactional commit (normalize/validate/dry-run/atomic ReplaceFileW/recovery copies), 16 new tests; no GUI writes yet by design
 - [x] Phase 3c GUI slice (2026-09-14): bounded editing in the Rust console — toggle enabled / set mode behind a confirmation dialog and one management-locked load→commit transaction (`runtime_lock` ports the WPF exclusive-handle semantics); live-verified block-while-WPF-runs and commit-after-exit; core suite at 55 tests
-- [ ] Phase 3 final: replace the WPF front end once parity is proven; the WPF product remains supported until then
+- [x] Parity slice (2026-09-14): constraints editor in the Rust console (hosts/IP/ports/protocol with live shared-validator gating and the same management-locked transaction as the other edits); live-verified commit + restore against the real configuration
+- [ ] Phase 3 final: remaining edit paths (proxy servers, rule add/delete, priority) and page parity, then replace the WPF front end once proven; the WPF product remains supported until then
 
 ## Candidate next work
 
