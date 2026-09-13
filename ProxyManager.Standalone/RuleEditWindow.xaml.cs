@@ -40,7 +40,11 @@ public partial class RuleEditWindow : Window
         Revalidate();
     }
 
-    private void Window_Loaded(object sender, RoutedEventArgs e) => DialogEntrance.Play(this);
+    private void Window_Loaded(object sender, RoutedEventArgs e)
+    {
+        DarkTitleBar.Apply(this);
+        DialogEntrance.Play(this);
+    }
 
     private void Field_Changed(object sender, TextChangedEventArgs e) => Revalidate();
 

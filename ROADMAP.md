@@ -154,6 +154,11 @@ The roadmap is evidence-driven. Items move forward when implementation, tests, a
 - [x] DarkDialogWindow replacing all twenty in-app MessageBox call sites with token-styled dialogs (icon chip, Primary/Secondary buttons, entrance animation); startup-failure prompts stay on the system box
 - [x] Fixed the v0.17 latent crash: Window.RenderTransform is forbidden in WPF — entrance animation now targets the content root (found live during dark-dialog inspection)
 
+## v0.26 — dark dialog title bars and first live dialog exercise (2026-09-13)
+
+- [x] DWM immersive-dark-mode title bar applied to the constraints editor, import preview, and themed message box (silent fallback on older Windows)
+- [x] Rule-constraints editor opened end-to-end for the first time since v0.13: dark chrome, complete form, clean close, no crash — live confirmation of the v0.25 entrance fix
+
 ## Candidate next work
 
 - [x] Guided sing-box discovery with version reporting

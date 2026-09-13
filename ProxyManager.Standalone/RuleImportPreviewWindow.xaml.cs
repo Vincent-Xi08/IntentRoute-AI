@@ -17,7 +17,11 @@ public partial class RuleImportPreviewWindow : Window
         NothingText.Visibility = preview.HasAdditions ? Visibility.Collapsed : Visibility.Visible;
     }
 
-    private void Window_Loaded(object sender, RoutedEventArgs e) => DialogEntrance.Play(this);
+    private void Window_Loaded(object sender, RoutedEventArgs e)
+    {
+        DarkTitleBar.Apply(this);
+        DialogEntrance.Play(this);
+    }
 
     private void Confirm_Click(object sender, RoutedEventArgs e) => DialogResult = true;
 

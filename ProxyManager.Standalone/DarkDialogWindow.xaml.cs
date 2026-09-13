@@ -109,5 +109,9 @@ public partial class DarkDialogWindow : Window
         DialogResult = false;
     }
 
-    private void Window_Loaded(object sender, RoutedEventArgs e) => DialogEntrance.Play(this);
+    private void Window_Loaded(object sender, RoutedEventArgs e)
+    {
+        DarkTitleBar.Apply(this);
+        DialogEntrance.Play(this);
+    }
 }

@@ -4,6 +4,13 @@ All notable changes are documented here. The project follows semantic versioning
 
 ## [Unreleased]
 
+## [0.26.0] - 2026-09-13
+
+### Changed
+
+- The three bordered dialogs (rule-constraints editor, import preview, themed message box) now request a dark system title bar through the DWM immersive-dark-mode attribute, removing the last white chrome around dark dialog content. Purely visual; falls back silently to the light title bar on Windows versions without the attribute.
+- The rule-constraints editor was exercised end-to-end for the first time since its v0.13 introduction: opened by double-clicking a rule row, dark title bar and full form verified (process header, host/IP/port fields with hints, protocol combo, save/cancel), closed cleanly with no crash — a live confirmation of the v0.25 entrance-animation fix on the exact path that used to be untested. The import preview shares the same loaded path and remains covered by that verification plus its unit tests; driving the system file-open dialog was skipped during inspection to avoid disrupting active use of the machine.
+
 ## [0.25.0] - 2026-09-08
 
 ### Added
