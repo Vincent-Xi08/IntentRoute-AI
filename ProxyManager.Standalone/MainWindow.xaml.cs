@@ -30,6 +30,9 @@ public partial class MainWindow : Window
     private string _searchFilter = "";
     private readonly List<ProcessRow> _allProcesses = new();
     private string _processSearchFilter = string.Empty;
+    // 列排序状态在过滤重建 ItemsSource 后仍需保持，因此存字段而非视图描述。
+    private string? _processSortProperty;
+    private bool _processSortDescending;
     private bool _isMaximized = false;
     private CancellationTokenSource? _aiGenerationCts;
     private CancellationTokenSource? _policyAnalysisCts;
@@ -1644,12 +1647,71 @@ public partial class MainWindow : Window
                 r.Name.Contains(_processSearchFilter, StringComparison.OrdinalIgnoreCase) ||
                 r.Pid.ToString().Contains(_processSearchFilter, StringComparison.OrdinalIgnoreCase));
         }
-        var filtered = view.ToList();
+        var filtered = SortProcessRows(view.ToList());
 
         ProcessList.ItemsSource = filtered;
         ProcessCount.Text = string.IsNullOrWhiteSpace(_processSearchFilter)
             ? string.Format(Localization.Strings.CountProcessesFormat, _allProcesses.Count)
             : string.Format(Localization.Strings.CountProcessesFilteredFormat, filtered.Count, _allProcesses.Count);
+    }
+
+    // 点击列头排序：同列再点切换升降序；排序状态跨过滤/刷新保持（在重建列表时重新应用）。
+    private void ProcessList_HeaderClick(object sender, RoutedEventArgs e)
+    {
+        if (e.OriginalSource is not GridViewColumnHeader header || header.Content is not string text) return;
+        var property = SortableProcessProperty(text);
+        if (property == null) return;
+        if (_processSortProperty == property)
+            _processSortDescending = !_processSortDescending;
+        else
+        {
+            _processSortProperty = property;
+            _processSortDescending = false;
+        }
+        UpdateProcessSortHeaders();
+        ApplyProcessFilter();
+    }
+
+    private static string? SortableProcessProperty(string headerText) => headerText switch
+    {
+        _ when headerText == Strings.ProcessColPid => nameof(ProcessRow.Pid),
+        _ when headerText == Strings.ProcessColName => nameof(ProcessRow.Name),
+        _ when headerText == Strings.ProcessColPath => nameof(ProcessRow.Path),
+        _ when headerText == Strings.ProcessColStatus => nameof(ProcessRow.Status),
+        _ => null
+    };
+
+    private List<ProcessRow> SortProcessRows(List<ProcessRow> rows) => _processSortProperty switch
+    {
+        nameof(ProcessRow.Pid) => _processSortDescending
+            ? rows.OrderByDescending(r => r.Pid).ToList()
+            : rows.OrderBy(r => r.Pid).ToList(),
+        nameof(ProcessRow.Name) => _processSortDescending
+            ? rows.OrderByDescending(r => r.Name, StringComparer.OrdinalIgnoreCase).ToList()
+            : rows.OrderBy(r => r.Name, StringComparer.OrdinalIgnoreCase).ToList(),
+        nameof(ProcessRow.Path) => _processSortDescending
+            ? rows.OrderByDescending(r => r.Path, StringComparer.OrdinalIgnoreCase).ToList()
+            : rows.OrderBy(r => r.Path, StringComparer.OrdinalIgnoreCase).ToList(),
+        nameof(ProcessRow.Status) => _processSortDescending
+            ? rows.OrderByDescending(r => r.Status, StringComparer.OrdinalIgnoreCase).ToList()
+            : rows.OrderBy(r => r.Status, StringComparer.OrdinalIgnoreCase).ToList(),
+        _ => rows
+    };
+
+    private void UpdateProcessSortHeaders()
+    {
+        if (ProcessList.View is not GridView view) return;
+        var columns = new[]
+        {
+            (view.Columns[0], Strings.ProcessColPid, nameof(ProcessRow.Pid)),
+            (view.Columns[1], Strings.ProcessColName, nameof(ProcessRow.Name)),
+            (view.Columns[2], Strings.ProcessColPath, nameof(ProcessRow.Path)),
+            (view.Columns[3], Strings.ProcessColStatus, nameof(ProcessRow.Status))
+        };
+        foreach (var (column, baseText, property) in columns)
+            column.Header = _processSortProperty == property
+                ? baseText + (_processSortDescending ? " ▼" : " ▲")
+                : baseText;
     }
 
     private void ProcessSearch_Changed(object sender, TextChangedEventArgs e)

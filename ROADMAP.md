@@ -172,6 +172,10 @@ The roadmap is evidence-driven. Items move forward when implementation, tests, a
 - [x] Rule rows expose the full process/conditions/path in a hover tooltip (the cells truncate with ellipsis)
 - [x] Runtime-log empty state that tracks the filtered view (no logs yet / cleared / filter matched nothing)
 
+## v0.30 — process-list column sorting (2026-09-13)
+
+- [x] Click-to-sort on the process page's PID/name/path/status headers with ▲/▼ indicator; sort state survives filtering and refreshes; rules list stays canonical (not sortable by design)
+
 ## Candidate next work
 
 - [x] Guided sing-box discovery with version reporting

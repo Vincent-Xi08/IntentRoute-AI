@@ -1112,7 +1112,7 @@
                         <!-- 进程列表卡片 -->
                         <Border Grid.Row="2" Background="{StaticResource CardBrush}" CornerRadius="8">
                             <ListView x:Name="ProcessList" Background="Transparent" BorderThickness="0" SelectionChanged="ProcessList_SelectionChanged"
-                                      KeyDown="ProcessList_KeyDown">
+                                      KeyDown="ProcessList_KeyDown" GridViewColumnHeader.Click="ProcessList_HeaderClick">
                                 <ListView.View>
                                     <GridView>
                                         <GridViewColumn Header="{x:Static loc:Strings.ProcessColPid}" Width="80" DisplayMemberBinding="{Binding Pid}"/>

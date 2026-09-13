@@ -4,6 +4,12 @@ All notable changes are documented here. The project follows semantic versioning
 
 ## [Unreleased]
 
+## [0.30.0] - 2026-09-13
+
+### Added
+
+- The process list is now sortable: clicking a column header (PID, name, path, rule status) sorts by that column, clicking again toggles ascending/descending, and the active column is marked with a ▲/▼ suffix. The sort state survives search filtering and list refreshes — because the filter rebuilds the `ItemsSource`, sorting is re-applied on rebuild from a stored field rather than a collection-view description. Name, path, and status compare case-insensitively. The rules list intentionally stays in canonical runtime order and is not sortable.
+
 ## [0.29.0] - 2026-09-13
 
 ### Added
