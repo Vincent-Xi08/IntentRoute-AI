@@ -167,6 +167,11 @@ The roadmap is evidence-driven. Items move forward when implementation, tests, a
 
 - [x] Enter on a selected process adds the rule through the shared duplicate-guarded flow; Ctrl+F focuses the visible page's search box (rules/process/log); Escape clears-or-returns-focus shared by all three search boxes
 
+## v0.29 — rule-row hover detail and log empty state (2026-09-13)
+
+- [x] Rule rows expose the full process/conditions/path in a hover tooltip (the cells truncate with ellipsis)
+- [x] Runtime-log empty state that tracks the filtered view (no logs yet / cleared / filter matched nothing)
+
 ## Candidate next work
 
 - [x] Guided sing-box discovery with version reporting

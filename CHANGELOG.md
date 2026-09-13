@@ -4,6 +4,13 @@ All notable changes are documented here. The project follows semantic versioning
 
 ## [Unreleased]
 
+## [0.29.0] - 2026-09-13
+
+### Added
+
+- Hovering a rule row now shows the full information its truncated cells hide: process name, the complete condition summary, and the executable path, replacing the path-only tooltip on the name.
+- The runtime-log page gained an empty state: when no log line survives the current filter (fresh start before sing-box is approved, everything cleared, or a filter matching nothing), a centered hint explains where logs will come from — matching the rules-page empty-state pattern instead of a blank card.
+
 ## [0.28.0] - 2026-09-13
 
 ### Added

@@ -211,6 +211,7 @@ public static class Strings
     public static string RouteStatusInitial => GetString(nameof(RouteStatusInitial));
     public static string MonitorTitle => GetString(nameof(MonitorTitle));
     public static string MonitorClear => GetString(nameof(MonitorClear));
+    public static string MonitorEmpty => GetString(nameof(MonitorEmpty));
     public static string MonitorColTime => GetString(nameof(MonitorColTime));
     public static string MonitorColMessage => GetString(nameof(MonitorColMessage));
     public static string MonitorSearchLabel => GetString(nameof(MonitorSearchLabel));

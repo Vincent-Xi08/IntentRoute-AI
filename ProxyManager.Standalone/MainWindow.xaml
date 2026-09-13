@@ -379,9 +379,17 @@
                                                            Foreground="{StaticResource MutedTextBrush}" VerticalAlignment="Center"
                                                            HorizontalAlignment="Center"/>
                                                 <StackPanel Grid.Column="1" VerticalAlignment="Center" Margin="8,7">
+                                                    <StackPanel.ToolTip>
+                                                        <!-- 悬停展示被省略号截断的完整信息：进程、条件、路径 -->
+                                                        <StackPanel Margin="2">
+                                                            <TextBlock Text="{Binding ExeName}" FontWeight="SemiBold"/>
+                                                            <TextBlock Text="{Binding ConditionSummary}"/>
+                                                            <TextBlock Text="{Binding ExePath}" FontSize="10"
+                                                                       Foreground="{StaticResource MutedTextBrush}"/>
+                                                        </StackPanel>
+                                                    </StackPanel.ToolTip>
                                                     <TextBlock Text="{Binding ExeName}" FontSize="12.5" FontWeight="SemiBold"
-                                                               Foreground="{StaticResource TextBrush}" TextTrimming="CharacterEllipsis"
-                                                               ToolTip="{Binding ExePath}"/>
+                                                               Foreground="{StaticResource TextBrush}" TextTrimming="CharacterEllipsis"/>
                                                     <TextBlock Text="{Binding ConditionSummary}" FontSize="10.5"
                                                                Foreground="{StaticResource SecondaryTextBrush}" TextTrimming="CharacterEllipsis"
                                                                Margin="0,3,0,0"/>
@@ -1009,8 +1017,9 @@
 
                         <!-- 日志列表卡片（终端风格：等宽字体） -->
                         <Border Grid.Row="2" Background="{StaticResource CardBrush}" CornerRadius="8">
-                            <ListView x:Name="LogsList" Background="Transparent" BorderThickness="0">
-                                <ListView.View>
+                            <Grid>
+                                <ListView x:Name="LogsList" Background="Transparent" BorderThickness="0">
+                                    <ListView.View>
                                     <GridView>
                                         <GridViewColumn Header="{x:Static loc:Strings.MonitorColTime}" Width="90">
                                             <GridViewColumn.CellTemplate>
@@ -1049,6 +1058,11 @@
                                     </GridView>
                                 </ListView.View>
                             </ListView>
+                                <!-- 空态：与规则页同款居中弱化提示 -->
+                                <TextBlock x:Name="LogsEmptyText" Text="{x:Static loc:Strings.MonitorEmpty}"
+                                           HorizontalAlignment="Center" VerticalAlignment="Center"
+                                           FontSize="12" Foreground="{StaticResource MutedTextBrush}" Visibility="Collapsed"/>
+                            </Grid>
                         </Border>
                     </Grid>
 

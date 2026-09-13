@@ -74,6 +74,7 @@ public partial class MainWindow : Window
                 _runtimeLogs.RemoveAt(0);
             if (LogAutoScrollToggle.IsChecked == true && LogsList.Items.Count > 0)
                 LogsList.ScrollIntoView(LogsList.Items[^1]);
+            UpdateLogsEmptyHint();
         });
 
         Loaded += MainWindow_Loaded;
@@ -1531,7 +1532,12 @@ public partial class MainWindow : Window
     {
         _service.ClearLogs();
         _runtimeLogs.Clear();
+        UpdateLogsEmptyHint();
     }
+
+    // 空态提示跟随过滤后的视图：LogsList.ItemsSource 是 ICollectionView，Items 即过滤结果。
+    private void UpdateLogsEmptyHint() =>
+        LogsEmptyText.Visibility = LogsList.Items.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
 
     private RuntimeLogLevel CurrentMinimumLogLevel() => LogLevelFilterCombo.SelectedIndex switch
     {
@@ -1554,12 +1560,14 @@ public partial class MainWindow : Window
         _logSearchDebounce.Stop();
         _logSearchText = LogSearchBox.Text;
         _logsView?.Refresh();
+        UpdateLogsEmptyHint();
     }
 
     private void LogLevelFilter_Changed(object sender, SelectionChangedEventArgs e)
     {
         if (_logsView == null) return;
         _logsView.Refresh();
+        UpdateLogsEmptyHint();
     }
 
     private void ExportLogs_Click(object sender, RoutedEventArgs e)
