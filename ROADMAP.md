@@ -163,6 +163,10 @@ The roadmap is evidence-driven. Items move forward when implementation, tests, a
 
 - [x] 300ms debounce on the rules and process search boxes, matching the log search; the process search no longer rebuilds the ~900-row ItemsSource per keystroke
 
+## v0.28 — keyboard parity on process and log pages (2026-09-13)
+
+- [x] Enter on a selected process adds the rule through the shared duplicate-guarded flow; Ctrl+F focuses the visible page's search box (rules/process/log); Escape clears-or-returns-focus shared by all three search boxes
+
 ## Candidate next work
 
 - [x] Guided sing-box discovery with version reporting

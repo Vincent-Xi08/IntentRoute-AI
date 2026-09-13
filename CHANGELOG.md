@@ -4,6 +4,12 @@ All notable changes are documented here. The project follows semantic versioning
 
 ## [Unreleased]
 
+## [0.28.0] - 2026-09-13
+
+### Added
+
+- Keyboard parity for the process and log pages, extending the v0.22 rules-page treatment: pressing Enter on a selected process creates the rule through the exact same duplicate-guarded flow as the toolbar button (including navigation and selection), Ctrl+F now focuses whichever search box belongs to the visible page (rules, process, or log), and Escape in the process/log search boxes clears them first and returns focus to the list on a second press — all three search boxes share one handler. No service-layer changes.
+
 ## [0.27.0] - 2026-09-13
 
 ### Changed

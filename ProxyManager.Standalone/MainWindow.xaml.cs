@@ -1377,26 +1377,44 @@ public partial class MainWindow : Window
     // Ctrl+F 在规则页聚焦搜索框；Esc 在搜索框内清空并交还列表焦点。
     private void Window_PreviewKeyDown(object sender, KeyEventArgs e)
     {
-        if (e.Key == Key.F && Keyboard.Modifiers == ModifierKeys.Control &&
-            PageRules.Visibility == Visibility.Visible && PageRules.Opacity > 0.99)
+        if (e.Key != Key.F || Keyboard.Modifiers != ModifierKeys.Control) return;
+        // Ctrl+F 聚焦当前可见页面的搜索框（规则/进程/日志三页等价）。
+        if (PageRules.Visibility == Visibility.Visible && PageRules.Opacity > 0.99)
         {
             SearchBox.Focus();
             SearchBox.SelectAll();
-            e.Handled = true;
         }
+        else if (PageProcess.Visibility == Visibility.Visible && PageProcess.Opacity > 0.99)
+        {
+            ProcessSearchBox.Focus();
+            ProcessSearchBox.SelectAll();
+        }
+        else if (PageMonitor.Visibility == Visibility.Visible && PageMonitor.Opacity > 0.99)
+        {
+            LogSearchBox.Focus();
+            LogSearchBox.SelectAll();
+        }
+        else return;
+        e.Handled = true;
     }
 
-    private void SearchBox_KeyDown(object sender, KeyEventArgs e)
+    private void SearchBox_KeyDown(object sender, KeyEventArgs e) =>
+        SearchBoxEscapeKeyDown(SearchBox, RulesList, e);
+
+    private void ProcessSearchBox_KeyDown(object sender, KeyEventArgs e) =>
+        SearchBoxEscapeKeyDown(ProcessSearchBox, ProcessList, e);
+
+    private void LogSearchBox_KeyDown(object sender, KeyEventArgs e) =>
+        SearchBoxEscapeKeyDown(LogSearchBox, LogsList, e);
+
+    // Esc：有内容先清空，已是空则把焦点交还列表——三个搜索框共用。
+    private static void SearchBoxEscapeKeyDown(TextBox box, Control list, KeyEventArgs e)
     {
         if (e.Key != Key.Escape) return;
-        if (SearchBox.Text.Length > 0)
-        {
-            SearchBox.Text = string.Empty;
-        }
+        if (box.Text.Length > 0)
+            box.Text = string.Empty;
         else
-        {
-            RulesList.Focus();
-        }
+            list.Focus();
         e.Handled = true;
     }
 
@@ -1645,7 +1663,17 @@ public partial class MainWindow : Window
         ProcessAddRuleButton.IsEnabled = ProcessList.SelectedItem is ProcessRow;
     }
 
-    private void AddRuleFromProcess_Click(object sender, RoutedEventArgs e)
+    private void AddRuleFromProcess_Click(object sender, RoutedEventArgs e) => TryAddRuleFromSelectedProcess();
+
+    // Enter 键与「添加为规则」按钮同一入口（v0.22 规则页键盘等价的延伸）。
+    private void ProcessList_KeyDown(object sender, KeyEventArgs e)
+    {
+        if (e.Key != Key.Enter) return;
+        TryAddRuleFromSelectedProcess();
+        e.Handled = true;
+    }
+
+    private void TryAddRuleFromSelectedProcess()
     {
         if (ProcessList.SelectedItem is not ProcessRow row) return;
         try

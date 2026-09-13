@@ -997,7 +997,7 @@
                                 <StackPanel Grid.Row="1" Orientation="Horizontal" Margin="0,10,0,0">
                                     <TextBlock Text="{x:Static loc:Strings.MonitorSearchLabel}" FontSize="11" Foreground="{StaticResource TextSecondaryBrush}" VerticalAlignment="Center"/>
                                     <TextBox x:Name="LogSearchBox" Width="200" Style="{StaticResource InputBox}" FontSize="11" Margin="8,0,0,0" VerticalAlignment="Center"
-                                             TextChanged="LogSearch_Changed" AutomationProperties.Name="{x:Static loc:Strings.MonitorSearchLabel}"/>
+                                             TextChanged="LogSearch_Changed" KeyDown="LogSearchBox_KeyDown" AutomationProperties.Name="{x:Static loc:Strings.MonitorSearchLabel}"/>
                                     <TextBlock Text="{x:Static loc:Strings.MonitorFilterLevel}" FontSize="11" Foreground="{StaticResource TextSecondaryBrush}" VerticalAlignment="Center" Margin="12,0,0,0"/>
                                     <ComboBox x:Name="LogLevelFilterCombo" Width="110" FontSize="11" Margin="8,0,0,0" VerticalAlignment="Center"
                                               SelectionChanged="LogLevelFilter_Changed" AutomationProperties.Name="{x:Static loc:Strings.MonitorFilterLevel}"/>
@@ -1086,7 +1086,7 @@
                                 <TextBlock Grid.Column="0" Text="{x:Static loc:Strings.ProcessTitle}" FontSize="13" FontWeight="SemiBold" Foreground="{StaticResource TextBrush}" VerticalAlignment="Center"/>
                                 <StackPanel Grid.Column="1" Orientation="Horizontal">
                                     <TextBox x:Name="ProcessSearchBox" Width="180" Style="{StaticResource InputBox}" FontSize="11" VerticalAlignment="Center"
-                                             TextChanged="ProcessSearch_Changed" AutomationProperties.Name="{x:Static loc:Strings.ProcessSearchLabel}"/>
+                                             TextChanged="ProcessSearch_Changed" KeyDown="ProcessSearchBox_KeyDown" AutomationProperties.Name="{x:Static loc:Strings.ProcessSearchLabel}"/>
                                     <Button x:Name="ProcessAddRuleButton" Content="{x:Static loc:Strings.ProcessAddRule}" Style="{StaticResource SecondaryBtn}" Padding="12,5" FontSize="11" Margin="8,0,0,0"
                                             IsEnabled="False" AutomationProperties.Name="{x:Static loc:Strings.ProcessAddRuleAutomation}" Click="AddRuleFromProcess_Click"/>
                                     <TextBlock x:Name="ProcessCount" Text="0 个进程" FontSize="12" Foreground="{StaticResource TextMutedBrush}" VerticalAlignment="Center" Margin="12,0,12,0"/>
@@ -1097,7 +1097,8 @@
 
                         <!-- 进程列表卡片 -->
                         <Border Grid.Row="2" Background="{StaticResource CardBrush}" CornerRadius="8">
-                            <ListView x:Name="ProcessList" Background="Transparent" BorderThickness="0" SelectionChanged="ProcessList_SelectionChanged">
+                            <ListView x:Name="ProcessList" Background="Transparent" BorderThickness="0" SelectionChanged="ProcessList_SelectionChanged"
+                                      KeyDown="ProcessList_KeyDown">
                                 <ListView.View>
                                     <GridView>
                                         <GridViewColumn Header="{x:Static loc:Strings.ProcessColPid}" Width="80" DisplayMemberBinding="{Binding Pid}"/>
