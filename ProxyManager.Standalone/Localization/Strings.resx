@@ -44,7 +44,7 @@
   <data name="NavSectionWorkspace" xml:space="preserve"><value>规则与策略</value></data>
   <data name="NavSectionRuntime" xml:space="preserve"><value>运行与监控</value></data>
   <data name="NavSectionApp" xml:space="preserve"><value>应用</value></data>
-  <data name="SidebarVersion" xml:space="preserve"><value>v0.30.0 开发预览版</value></data>
+  <data name="SidebarVersion" xml:space="preserve"><value>v0.31.0 开发预览版</value></data>
   <data name="StatusFooterLabel" xml:space="preserve"><value>运行状态</value></data>
   <data name="StatusFooterInitial" xml:space="preserve"><value>正在检查 sing-box…</value></data>
   <data name="ModeDirectLabel" xml:space="preserve"><value>默认直连</value></data>
@@ -93,7 +93,7 @@
   <data name="RuleEditBadIps" xml:space="preserve"><value>IP / CIDR 约束格式无效</value></data>
   <data name="RuleEditBadPorts" xml:space="preserve"><value>端口约束格式无效</value></data>
   <data name="RuleEditBadProtocol" xml:space="preserve"><value>协议必须是 TCP、UDP、Both 或不限</value></data>
-  <data name="AboutTagline" xml:space="preserve"><value>AI 辅助 Windows 网络分流 v0.30.0</value></data>
+  <data name="AboutTagline" xml:space="preserve"><value>AI 辅助 Windows 网络分流 v0.31.0</value></data>
   <data name="AboutFeaturesTitle" xml:space="preserve"><value>功能特性</value></data>
   <data name="AboutFeature1" xml:space="preserve"><value>• 拖拽添加应用程序规则</value></data>
   <data name="AboutFeature2" xml:space="preserve"><value>• 支持代理/直连/阻止三种模式</value></data>

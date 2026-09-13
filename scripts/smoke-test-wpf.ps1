@@ -195,6 +195,10 @@ try {
             throw "Monitor page does not expose the $monitorControlId automation element."
         }
     }
+    # v0.29: the log empty-state hint must exist — on a fresh profile no log line exists yet.
+    if ($null -eq (Find-ControlByAutomationId -Root $root -AutomationId 'LogsEmptyText')) {
+        throw 'Monitor page does not expose the LogsEmptyText empty-state element.'
+    }
 
     Select-NavPage -Root $root -AutomationId 'NavProcess' -VerifyControlId 'ProcessSearchBox'
     $processSearchBox = Find-ControlByAutomationId -Root $root -AutomationId 'ProcessSearchBox'

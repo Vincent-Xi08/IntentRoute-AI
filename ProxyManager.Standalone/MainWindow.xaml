@@ -380,12 +380,24 @@
                                                            HorizontalAlignment="Center"/>
                                                 <StackPanel Grid.Column="1" VerticalAlignment="Center" Margin="8,7">
                                                     <StackPanel.ToolTip>
-                                                        <!-- 悬停展示被省略号截断的完整信息：进程、条件、路径 -->
+                                                        <!-- 悬停展示被省略号截断的完整信息：进程、条件、路径、备注（空备注折叠） -->
                                                         <StackPanel Margin="2">
                                                             <TextBlock Text="{Binding ExeName}" FontWeight="SemiBold"/>
                                                             <TextBlock Text="{Binding ConditionSummary}"/>
                                                             <TextBlock Text="{Binding ExePath}" FontSize="10"
                                                                        Foreground="{StaticResource MutedTextBrush}"/>
+                                                            <TextBlock Text="{Binding Note}" FontSize="10"
+                                                                       Foreground="{StaticResource SecondaryTextBrush}">
+                                                                <TextBlock.Style>
+                                                                    <Style TargetType="TextBlock" BasedOn="{StaticResource {x:Type TextBlock}}">
+                                                                        <Style.Triggers>
+                                                                            <DataTrigger Binding="{Binding Note}" Value="">
+                                                                                <Setter Property="Visibility" Value="Collapsed"/>
+                                                                            </DataTrigger>
+                                                                        </Style.Triggers>
+                                                                    </Style>
+                                                                </TextBlock.Style>
+                                                            </TextBlock>
                                                         </StackPanel>
                                                     </StackPanel.ToolTip>
                                                     <TextBlock Text="{Binding ExeName}" FontSize="12.5" FontWeight="SemiBold"

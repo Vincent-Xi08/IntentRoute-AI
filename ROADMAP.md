@@ -176,6 +176,10 @@ The roadmap is evidence-driven. Items move forward when implementation, tests, a
 
 - [x] Click-to-sort on the process page's PID/name/path/status headers with ▲/▼ indicator; sort state survives filtering and refreshes; rules list stays canonical (not sortable by design)
 
+## v0.31 — tooltip completion and documentation accuracy (2026-09-13)
+
+- [x] Rule-row hover tooltip includes the note (collapsed when empty); README resource-key count corrected 533 → 553 after drifting across five releases; smoke gate asserts the log empty-state element
+
 ## Candidate next work
 
 - [x] Guided sing-box discovery with version reporting

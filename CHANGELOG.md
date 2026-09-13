@@ -4,6 +4,14 @@ All notable changes are documented here. The project follows semantic versioning
 
 ## [Unreleased]
 
+## [0.31.0] - 2026-09-13
+
+### Changed
+
+- The rule-row hover tooltip now includes the rule's note when one exists (collapsed entirely for empty notes), completing the promise that the tooltip shows everything the truncated cells hide.
+- Corrected the resource-key count in both READMEs: 533 → 553. The number had drifted through the v0.17 footnote keys, v0.19 batch strings, v0.21 feedback format, v0.25 dialog buttons, and v0.29 empty-state additions without the documented figure being updated.
+- The packaged-WPF smoke gate now asserts the log page's empty-state element exists, guarding the v0.29 feature against removal or rename.
+
 ## [0.30.0] - 2026-09-13
 
 ### Added
