@@ -29,7 +29,7 @@
 /.vscode/
 /.idea/
 /.cursor/
-/.mimosa/
+.mimosa/
 /.video_agent/
 /.playwright-mcp/
 .DS_Store
