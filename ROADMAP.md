@@ -186,7 +186,8 @@ The roadmap is evidence-driven. Items move forward when implementation, tests, a
 - [x] Phase 2 (2026-09-13): sing-box configuration builder ported to the Rust core with loopback-only upstream validation, redaction, and password-scrubbed errors; CLI `build-config`; the pinned real-sing-box gate validates both C# and Rust builder output against v1.13.19 (37 core tests)
 - [x] Phase 3a (2026-09-13): `intentroute-gui` read-only rules console (eframe/egui) — real-config autoloading, canonical order, filter/sort, validation flags, detail panel; editing and DPAPI writes remain in the WPF app
 - [x] Phase 3b (2026-09-13): Chinese UI parity — runtime-loaded CJK system font (msyh/simhei/simsun, nothing bundled), language follows font availability with an English fallback and an `INTENTROUTE_GUI_LANG` override; all shell strings localized in-crate
-- [ ] Phase 3c: edit paths in the Rust shell behind the same Configuration-Workspace transaction semantics (including the DPAPI password boundary), then page-by-page parity and handover
+- [x] Phase 3c engine slice (2026-09-13): `dpapi` + `workspace` in the Rust core — DPAPI envelope parity and the full transactional commit (normalize/validate/dry-run/atomic ReplaceFileW/recovery copies), 16 new tests; no GUI writes yet by design
+- [ ] Phase 3c GUI slice: wire edits into the Rust shell behind the workspace engine, with coordination against a running WPF instance (management-lock interop) before any write path ships
 - [ ] Phase 3 final: replace the WPF front end once parity is proven; the WPF product remains supported until then
 
 ## Candidate next work

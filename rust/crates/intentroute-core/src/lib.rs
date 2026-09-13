@@ -14,15 +14,21 @@
 //!   timestamp, persisted order).
 //! - [`builder`] — the sing-box 1.13+ configuration builder (phase 2),
 //!   including loopback-only upstream validation and password redaction.
+//! - [`dpapi`] / [`workspace`] — the transactional persistence boundary
+//!   (phase 3c engine): DPAPI `"dpapi:"` envelopes and clone→mutate→
+//!   normalize→validate→atomic-replace commits that leave memory and disk
+//!   unchanged on any failure.
 
 pub mod builder;
 pub mod config;
 pub mod constraint;
+pub mod dpapi;
 pub mod identity;
 pub mod import_plan;
 pub mod local_endpoint;
 pub mod runtime_order;
 pub mod rule;
+pub mod workspace;
 
 pub use builder::{build as build_sing_box_config, BuildResult, DIRECT_TAG};
 pub use config::{AppConfig, GlobalMode, ProxyServer, ProxyType};
@@ -31,3 +37,4 @@ pub use import_plan::{ImportDisposition, ImportPlan, ImportPreviewRow, plan_impo
 pub use local_endpoint::try_normalize as try_normalize_local_endpoint;
 pub use rule::{ProxyMode, ProxyRule};
 pub use runtime_order::canonical_order;
+pub use workspace::{LoadStatus, Workspace};
