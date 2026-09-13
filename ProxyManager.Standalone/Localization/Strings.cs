@@ -291,6 +291,9 @@ public static class Strings
     public static string RulesBatchHint => GetString(nameof(RulesBatchHint));
     public static string BatchOperationDoneFormat => GetString(nameof(BatchOperationDoneFormat));
     public static string CommonCancel => GetString(nameof(CommonCancel));
+    public static string CommonOk => GetString(nameof(CommonOk));
+    public static string CommonYes => GetString(nameof(CommonYes));
+    public static string CommonNo => GetString(nameof(CommonNo));
     public static string DialogImportTitle => GetString(nameof(DialogImportTitle));
     public static string DialogExportTitle => GetString(nameof(DialogExportTitle));
     public static string DialogJsonFilter => GetString(nameof(DialogJsonFilter));

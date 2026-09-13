@@ -585,13 +585,13 @@ public partial class MainWindow : Window
         var providerNotice = provider.Kind == AiProviderKind.OpenAI
             ? Strings.PolicyConfirmOpenAi
             : Strings.PolicyConfirmOllama;
-        var confirmed = MessageBox.Show(
+        var confirmed = DarkDialogWindow.Show(
+            this,
             providerNotice + "\n\n" + Strings.PolicyConfirmJsonHeader + "\n" + preview +
             "\n\n" + Strings.PolicyConfirmExclusionNote,
             Strings.PolicyConfirmTitle,
-            MessageBoxButton.YesNo,
-            MessageBoxImage.Question,
-            MessageBoxResult.No);
+            DarkDialogIcon.Question,
+            DarkDialogButtons.YesNo);
         if (confirmed != MessageBoxResult.Yes)
         {
             PolicyStatusText.Text = Strings.PolicyMsgSendCancelled;
@@ -1184,8 +1184,8 @@ public partial class MainWindow : Window
 
     private void Clear_Click(object sender, RoutedEventArgs e)
     {
-        if (MessageBox.Show(Strings.RulesClearConfirm, Strings.DialogConfirmTitle,
-            MessageBoxButton.YesNo, MessageBoxImage.Question) == MessageBoxResult.Yes)
+        if (DarkDialogWindow.Show(this, Strings.RulesClearConfirm, Strings.DialogConfirmTitle,
+            DarkDialogIcon.Question, DarkDialogButtons.YesNo) == MessageBoxResult.Yes)
         {
             _service.ClearRules();
             LoadRules();
@@ -1231,8 +1231,8 @@ public partial class MainWindow : Window
         }
         catch (Exception ex)
         {
-            MessageBox.Show(SingBoxRuntime.RedactSecrets(ex.Message), Strings.DialogErrorTitle,
-                MessageBoxButton.OK, MessageBoxImage.Warning);
+            DarkDialogWindow.Show(this, SingBoxRuntime.RedactSecrets(ex.Message), Strings.DialogErrorTitle,
+                DarkDialogIcon.Warning);
         }
     }
 
@@ -1261,8 +1261,8 @@ public partial class MainWindow : Window
         var rule = GetSelectedRule();
         if (rule != null)
         {
-            if (MessageBox.Show(string.Format(Strings.RulesDeleteConfirmFormat, rule.ExeName), Strings.DialogConfirmTitle,
-                MessageBoxButton.YesNo, MessageBoxImage.Question) == MessageBoxResult.Yes)
+            if (DarkDialogWindow.Show(this, string.Format(Strings.RulesDeleteConfirmFormat, rule.ExeName), Strings.DialogConfirmTitle,
+                DarkDialogIcon.Question, DarkDialogButtons.YesNo) == MessageBoxResult.Yes)
             {
                 _service.RemoveRule(rule.Id);
                 LoadRules();
@@ -1338,8 +1338,8 @@ public partial class MainWindow : Window
     {
         var rules = GetSelectedRules();
         if (rules.Count == 0) return;
-        if (MessageBox.Show(string.Format(Strings.RulesBatchDeleteConfirmFormat, rules.Count), Strings.DialogConfirmTitle,
-            MessageBoxButton.YesNo, MessageBoxImage.Question) != MessageBoxResult.Yes) return;
+        if (DarkDialogWindow.Show(this, string.Format(Strings.RulesBatchDeleteConfirmFormat, rules.Count), Strings.DialogConfirmTitle,
+            DarkDialogIcon.Question, DarkDialogButtons.YesNo) != MessageBoxResult.Yes) return;
         var removed = _service.RemoveRules(rules.Select(rule => rule.Id).ToList());
         if (removed > 0)
             ShowBatchFeedback(string.Format(Strings.BatchOperationDoneFormat, Strings.RulesBatchDelete, removed));
@@ -1432,13 +1432,14 @@ public partial class MainWindow : Window
 
                 var added = _service.ImportRules(import.Rules);
                 LoadRules();
-                MessageBox.Show(
+                DarkDialogWindow.Show(this,
                     string.Format(Strings.ImportDoneFormat, added, preview.SkipCount),
-                    Strings.DialogSuccessTitle);
+                    Strings.DialogSuccessTitle, DarkDialogIcon.Info);
             }
             catch (Exception ex)
             {
-                MessageBox.Show(string.Format(Strings.ImportFailedFormat, ex.Message), Strings.DialogErrorTitle);
+                DarkDialogWindow.Show(this, string.Format(Strings.ImportFailedFormat, ex.Message), Strings.DialogErrorTitle,
+                    DarkDialogIcon.Error);
             }
         }
     }
@@ -1464,11 +1465,13 @@ public partial class MainWindow : Window
                 };
                 var json = Newtonsoft.Json.JsonConvert.SerializeObject(export, Newtonsoft.Json.Formatting.Indented);
                 File.WriteAllText(dialog.FileName, json);
-                MessageBox.Show(string.Format(Strings.ExportDoneFormat, _service.Config.Rules.Count), Strings.DialogSuccessTitle);
+                DarkDialogWindow.Show(this, string.Format(Strings.ExportDoneFormat, _service.Config.Rules.Count), Strings.DialogSuccessTitle,
+                    DarkDialogIcon.Info);
             }
             catch (Exception ex)
             {
-                MessageBox.Show(string.Format(Strings.ExportFailedFormat, ex.Message), Strings.DialogErrorTitle);
+                DarkDialogWindow.Show(this, string.Format(Strings.ExportFailedFormat, ex.Message), Strings.DialogErrorTitle,
+                    DarkDialogIcon.Error);
             }
         }
     }
@@ -1536,8 +1539,8 @@ public partial class MainWindow : Window
             .ToList();
         if (lines.Count == 0)
         {
-            MessageBox.Show(Strings.MonitorExportEmpty, Strings.DialogErrorTitle,
-                MessageBoxButton.OK, MessageBoxImage.Information);
+            DarkDialogWindow.Show(this, Strings.MonitorExportEmpty, Strings.DialogErrorTitle,
+                DarkDialogIcon.Info);
             return;
         }
 
@@ -1555,17 +1558,16 @@ public partial class MainWindow : Window
                 dialog.FileName,
                 RuntimeLogFilter.BuildExportText(lines),
                 new System.Text.UTF8Encoding(false));
-            MessageBox.Show(
+            DarkDialogWindow.Show(this,
                 string.Format(Strings.MonitorExportDoneFormat, lines.Count, dialog.FileName),
-                Strings.DialogSuccessTitle);
+                Strings.DialogSuccessTitle, DarkDialogIcon.Info);
         }
         catch (Exception ex)
         {
-            MessageBox.Show(
+            DarkDialogWindow.Show(this,
                 string.Format(Strings.MonitorExportFailedFormat, SingBoxRuntime.RedactSecrets(ex.Message)),
                 Strings.DialogErrorTitle,
-                MessageBoxButton.OK,
-                MessageBoxImage.Warning);
+                DarkDialogIcon.Warning);
         }
     }
 
@@ -1631,8 +1633,8 @@ public partial class MainWindow : Window
             var rule = _service.AddRuleByName(row.Name, row.Path);
             if (rule == null)
             {
-                MessageBox.Show(Strings.ProcessRuleExists, Strings.DialogErrorTitle,
-                    MessageBoxButton.OK, MessageBoxImage.Information);
+                DarkDialogWindow.Show(this, Strings.ProcessRuleExists, Strings.DialogErrorTitle,
+                    DarkDialogIcon.Info);
                 return;
             }
 
@@ -1648,8 +1650,8 @@ public partial class MainWindow : Window
         }
         catch (Exception ex)
         {
-            MessageBox.Show(SingBoxRuntime.RedactSecrets(ex.Message), Strings.DialogErrorTitle,
-                MessageBoxButton.OK, MessageBoxImage.Warning);
+            DarkDialogWindow.Show(this, SingBoxRuntime.RedactSecrets(ex.Message), Strings.DialogErrorTitle,
+                DarkDialogIcon.Warning);
         }
     }
 
@@ -1703,7 +1705,7 @@ public partial class MainWindow : Window
     {
         if (!int.TryParse(ProxyPort.Text, out var port))
         {
-            MessageBox.Show(Strings.ProxyInvalidPort, Strings.DialogErrorTitle, MessageBoxButton.OK, MessageBoxImage.Warning);
+            DarkDialogWindow.Show(this, Strings.ProxyInvalidPort, Strings.DialogErrorTitle, DarkDialogIcon.Warning);
             return;
         }
 
@@ -1724,7 +1726,7 @@ public partial class MainWindow : Window
         }
         catch (Exception ex) when (ex is ArgumentException or InvalidOperationException)
         {
-            MessageBox.Show(ex.Message, Strings.ProxySaveFailTitle, MessageBoxButton.OK, MessageBoxImage.Warning);
+            DarkDialogWindow.Show(this, ex.Message, Strings.ProxySaveFailTitle, DarkDialogIcon.Warning);
         }
     }
 
@@ -1774,7 +1776,7 @@ public partial class MainWindow : Window
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or ArgumentException or InvalidOperationException)
         {
-            MessageBox.Show(ex.Message, Strings.RuntimeUseFailTitle, MessageBoxButton.OK, MessageBoxImage.Warning);
+            DarkDialogWindow.Show(this, ex.Message, Strings.RuntimeUseFailTitle, DarkDialogIcon.Warning);
         }
     }
 
@@ -1791,7 +1793,7 @@ public partial class MainWindow : Window
         }
         catch (InvalidOperationException ex)
         {
-            MessageBox.Show(ex.Message, Strings.RuntimePathFailTitle, MessageBoxButton.OK, MessageBoxImage.Warning);
+            DarkDialogWindow.Show(this, ex.Message, Strings.RuntimePathFailTitle, DarkDialogIcon.Warning);
         }
     }
 
@@ -1946,7 +1948,7 @@ public partial class MainWindow : Window
         }
         catch
         {
-            MessageBox.Show(_service.ConfigDirectory, Strings.DialogConfigDirTitle, MessageBoxButton.OK, MessageBoxImage.Information);
+            DarkDialogWindow.Show(this, _service.ConfigDirectory, Strings.DialogConfigDirTitle, DarkDialogIcon.Info);
         }
     }
 
@@ -1969,18 +1971,18 @@ public partial class MainWindow : Window
         }
         catch (Exception ex) when (ex is IOException or InvalidDataException or UnauthorizedAccessException or ArgumentException or InvalidOperationException or Newtonsoft.Json.JsonException or AppConfigProtectionException)
         {
-            MessageBox.Show(string.Format(Strings.RecoveryImportFailBodyFormat, ex.Message),
-                Strings.RecoveryImportFailTitle, MessageBoxButton.OK, MessageBoxImage.Warning);
+            DarkDialogWindow.Show(this, string.Format(Strings.RecoveryImportFailBodyFormat, ex.Message),
+                Strings.RecoveryImportFailTitle, DarkDialogIcon.Warning);
         }
     }
 
     private async void ResetConfig_Click(object sender, RoutedEventArgs e)
     {
-        var answer = MessageBox.Show(
+        var answer = DarkDialogWindow.Show(this,
             Strings.RecoveryResetConfirmBody,
             Strings.RecoveryResetConfirmTitle,
-            MessageBoxButton.YesNo,
-            MessageBoxImage.Warning);
+            DarkDialogIcon.Warning,
+            DarkDialogButtons.YesNo);
         if (answer != MessageBoxResult.Yes) return;
 
         try
@@ -1993,7 +1995,7 @@ public partial class MainWindow : Window
         }
         catch (Exception ex)
         {
-            MessageBox.Show(ex.Message, Strings.RecoveryResetFailTitle, MessageBoxButton.OK, MessageBoxImage.Error);
+            DarkDialogWindow.Show(this, ex.Message, Strings.RecoveryResetFailTitle, DarkDialogIcon.Error);
         }
     }
 

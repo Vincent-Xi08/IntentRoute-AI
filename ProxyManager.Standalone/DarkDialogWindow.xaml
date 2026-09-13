@@ -1,0 +1,44 @@
+<Window x:Class="ProxyManager.Standalone.DarkDialogWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:loc="clr-namespace:ProxyManager.Standalone.Localization"
+        Title="IntentRoute AI" Width="440" SizeToContent="Height"
+        WindowStartupLocation="CenterOwner" ShowInTaskbar="False" ResizeMode="NoResize"
+        WindowStyle="SingleBorderWindow"
+        Background="{StaticResource BackgroundBrush}"
+        Loaded="Window_Loaded">
+    <!-- 深色主题弹窗：替换系统 MessageBox，避免深色界面里弹出白色系统框。 -->
+    <Grid Margin="20">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
+        </Grid.RowDefinitions>
+
+        <Grid Grid.Row="0" Margin="0,0,0,18">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="Auto"/>
+                <ColumnDefinition Width="*"/>
+            </Grid.ColumnDefinitions>
+            <Border x:Name="IconChip" Grid.Column="0" Width="44" Height="44" CornerRadius="10"
+                    VerticalAlignment="Top" Margin="0,2,14,0">
+                <Path x:Name="IconPath" Data="M12,2 a10,10 0 1,0 0.001,0"
+                      Stroke="{StaticResource AccentBrush}" StrokeThickness="1.8"
+                      Fill="Transparent" Stretch="Uniform" Margin="10"/>
+            </Border>
+            <TextBlock x:Name="MessageText" Grid.Column="1" FontSize="12.5"
+                       Foreground="{StaticResource TextBrush}" TextWrapping="Wrap"
+                       VerticalAlignment="Center" LineHeight="19"/>
+        </Grid>
+
+        <StackPanel Grid.Row="1" Orientation="Horizontal" HorizontalAlignment="Right">
+            <Button x:Name="CancelButton" Style="{StaticResource SecondaryButton}"
+                    Content="{x:Static loc:Strings.CommonCancel}" Click="Cancel_Click"
+                    Margin="0,0,8,0" Visibility="Collapsed"
+                    AutomationProperties.Name="{x:Static loc:Strings.CommonCancel}"/>
+            <Button x:Name="ConfirmButton" Style="{StaticResource PrimaryButton}"
+                    Content="{x:Static loc:Strings.CommonOk}" Click="Confirm_Click"
+                    IsDefault="True"
+                    AutomationProperties.Name="{x:Static loc:Strings.CommonOk}"/>
+        </StackPanel>
+    </Grid>
+</Window>

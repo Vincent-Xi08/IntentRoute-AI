@@ -8,9 +8,9 @@
 
 IntentRoute AI 是一个 Windows 开源控制平面：把自然语言的网络分流意图，转换成经过本地校验的路由规则草案。它可以使用 OpenAI Responses API 或本机已运行的 Ollama 模型；接纳的规则交给与手工编辑器完全相同的确定性 sing-box TUN 配置管线。
 
-> **项目状态：v0.24.0 预览版。** IntentRoute AI 适合测试与早期采用，尚未经过大规模生产验证。AI 输出可能不完整或有误；每条生成的规则都经过本地校验、以禁用状态写入，必须由你显式启用。
+> **项目状态：v0.25.0 预览版。** IntentRoute AI 适合测试与早期采用，尚未经过大规模生产验证。AI 输出可能不完整或有误；每条生成的规则都经过本地校验、以禁用状态写入，必须由你显式启用。
 
-v0.19.0 为规则工具栏新增批量代理/直连/阻止按钮——把此前没有界面入口的 `SetRulesMode` 事务暴露出来——并为运行日志增加等级着色。v0.18.0 以主题色页头与统一列表页结构完成界面翻新；v0.16–v0.17 建立共享深色设计系统与组件库打磨；v0.15.0 加入按完整规则身份去重的规则导入预览。每个发布包仍内嵌 v0.9.0 引入的未签名 `provenance.json` 构建溯源清单；代码签名本身仍需要证书。
+v0.25.0 将应用内全部 20 处弹窗替换为主题化深色对话框，并修复了 v0.17 遗留的进场动画崩溃缺陷（WPF 不允许对 Window 设置 RenderTransform）。v0.24.0 以 100% + 125% 双屏实测记录声称混合 DPI 视觉验证；v0.19–v0.23 交付批量模式按钮、日志等级着色、键盘交互与审查加固；v0.15–v0.18 依次加入导入预览、共享深色设计系统、组件打磨与主题色页头。每个发布包仍内嵌 v0.9.0 引入的未签名 `provenance.json` 构建溯源清单；代码签名本身仍需要证书。
 
 ## 为什么做这个项目
 
@@ -134,7 +134,7 @@ IntentRoute AI **不**提供代理节点、VPN 账号、抓包驱动、内置 AI
 
 ## 安装预览版
 
-1. 从 [Releases](https://github.com/Vincent-Xi08/IntentRoute-AI/releases) 下载 `IntentRoute-AI-v0.24.0-win-x64.zip` 与 `.sha256` 文件。
+1. 从 [Releases](https://github.com/Vincent-Xi08/IntentRoute-AI/releases) 下载 `IntentRoute-AI-v0.25.0-win-x64.zip` 与 `.sha256` 文件。
 2. 校验校验和。
 3. 单独下载官方 Windows x64 sing-box v1.13+ 压缩包。
 4. 单独安装 `sing-box.exe`，然后在**每次以管理员启动应用后**，通过 **设置 → 浏览** 显式批准确切文件。已保存路径、导入的档案/配置、`INTENTROUTE_SING_BOX`、旧版 `PROXYMANAGER_SING_BOX`、应用目录与 `PATH` 都只是候选发现提示：可以显示，但在本次会话重新选择该文件之前，不会对其执行 `version`、`check` 或 `run`。

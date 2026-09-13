@@ -4,6 +4,16 @@ All notable changes are documented here. The project follows semantic versioning
 
 ## [Unreleased]
 
+## [0.25.0] - 2026-09-08
+
+### Added
+
+- All twenty in-app message boxes (confirmations, completion notices, error and warning prompts, the policy-disclosure confirmation) now render as a themed dark dialog instead of the white system `MessageBox` that clashed with the dark UI. The new `DarkDialogWindow` reuses the app's design tokens (soft icon chips in accent/warning/error colors, Primary/Secondary buttons, 200ms entrance animation) and keeps `MessageBoxResult` semantics, so every call site is a drop-in replacement. The two startup-failure prompts in `App.xaml.cs` intentionally stay on the system message box: they fire before any window exists.
+
+### Fixed
+
+- Fixed a latent crash from v0.17: the shared dialog entrance animation set `Window.RenderTransform` directly, which WPF forbids (`CoerceRenderTransform` throws "Transform is not valid for Window"), so opening the rule-constraints editor or the import preview would have terminated the process. The animation now targets the window's content root instead. The defect had never been exercised end-to-end until the new dark dialog was first opened during this release's inspection, where it crashed the app and was caught from the event log.
+
 ## [0.24.0] - 2026-09-07
 
 ### Changed

@@ -149,6 +149,11 @@ The roadmap is evidence-driven. Items move forward when implementation, tests, a
 - [x] Full manual procedure executed from the physical console on a 100% + 125% dual-display setup with the official v0.23.0 archive: launch, display-move re-render, maximized layout, and all eight pages verified crisp and unclipped (recorded in docs/mixed-dpi-verification.md)
 - [x] Root-caused the earlier "both displays 100%" environment readings: system-DPI-aware query processes get virtualized DPI, not a real environment limit
 
+## v0.25 — themed dialogs and entrance-crash fix (2026-09-08)
+
+- [x] DarkDialogWindow replacing all twenty in-app MessageBox call sites with token-styled dialogs (icon chip, Primary/Secondary buttons, entrance animation); startup-failure prompts stay on the system box
+- [x] Fixed the v0.17 latent crash: Window.RenderTransform is forbidden in WPF — entrance animation now targets the content root (found live during dark-dialog inspection)
+
 ## Candidate next work
 
 - [x] Guided sing-box discovery with version reporting
