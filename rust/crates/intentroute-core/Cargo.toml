@@ -1,0 +1,10 @@
+[package]
+name = "intentroute-core"
+description = "Deterministic core of IntentRoute AI: rule model, constraint validation, rule identity, import planning, and canonical runtime order, ported from the C# product"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+serde = { workspace = true }
+serde_json = { workspace = true }

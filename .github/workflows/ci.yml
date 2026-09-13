@@ -41,6 +41,10 @@ jobs:
         shell: pwsh
         run: ./scripts/test-release-notes.ps1
 
+      - name: Test Rust core (migration phase 1)
+        shell: pwsh
+        run: ./scripts/test-rust.ps1
+
       - name: Check vulnerable dependencies
         shell: pwsh
         run: ./scripts/check-vulnerabilities.ps1

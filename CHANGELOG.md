@@ -4,6 +4,10 @@ All notable changes are documented here. The project follows semantic versioning
 
 ## [Unreleased]
 
+### Added (repository)
+
+- Rust migration, phase 1: a `rust/` workspace with `intentroute-core` (rule model JSON-compatible with the C# store, constraint validator, rule identity, import planner, canonical runtime order — test vectors ported from the C# suites, 21 tests) and `intentroute-cli` (`check` / `order` / `import-preview` over rule-export or full-config files, strict UTF-8). The CLI has been exercised against the real product `config.json`. CI gains a `scripts/test-rust.ps1` gate; the WPF product is untouched this phase.
+
 ## [0.31.0] - 2026-09-13
 
 ### Changed

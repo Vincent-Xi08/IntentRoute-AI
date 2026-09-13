@@ -1,0 +1,3 @@
+# Rust workspace (migration phase 1) — Cargo.lock stays committed for
+# reproducible CLI builds; only build output is ignored.
+target/

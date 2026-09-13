@@ -180,6 +180,12 @@ The roadmap is evidence-driven. Items move forward when implementation, tests, a
 
 - [x] Rule-row hover tooltip includes the note (collapsed when empty); README resource-key count corrected 533 → 553 after drifting across five releases; smoke gate asserts the log empty-state element
 
+## Rust migration — phased rewrite
+
+- [x] Phase 1 (2026-09-13): `intentroute-core` crate (rule model / constraint validation / identity / import planning / runtime order, C#-parity tests) + `intentroute-cli` (`check`/`order`/`import-preview`), validated against the real product config; CI gate `scripts/test-rust.ps1`
+- [ ] Phase 2: port `SingBoxConfigBuilder` and the pinned real-sing-box integration gate to the Rust core
+- [ ] Phase 3: Rust GUI shell (Tauri or native) replacing the WPF front end page by page; the WPF product remains supported until parity is proven
+
 ## Candidate next work
 
 - [x] Guided sing-box discovery with version reporting
