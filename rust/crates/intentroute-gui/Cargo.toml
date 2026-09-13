@@ -1,0 +1,13 @@
+[package]
+name = "intentroute-gui"
+description = "Read-only rules console for IntentRoute AI (Rust migration phase 3a), built on the shared Rust core"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+intentroute-core = { path = "../intentroute-core" }
+serde = { workspace = true }
+serde_json = { workspace = true }
+eframe = "0.28"
+rfd = "0.14"

@@ -1,6 +1,6 @@
 [workspace]
 resolver = "2"
-members = ["crates/intentroute-core", "crates/intentroute-cli"]
+members = ["crates/intentroute-core", "crates/intentroute-cli", "crates/intentroute-gui"]
 
 [workspace.package]
 edition = "2021"

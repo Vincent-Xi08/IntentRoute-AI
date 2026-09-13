@@ -6,6 +6,8 @@ All notable changes are documented here. The project follows semantic versioning
 
 ### Added (repository)
 
+- Rust migration, phase 3a: `intentroute-gui`, a read-only rules console built on eframe/egui over the shared Rust core. It auto-loads the real product configuration at startup (strict UTF-8, schema-checked), shows rules in Canonical Runtime Order with a filter box, click-to-sort columns, constraint-validation flags, and a detail panel (id, path, mode/status/priority, constraint fields, validation result); Ctrl+O opens any config, F5 reloads. It never writes configuration — editing and the DPAPI password boundary stay in the WPF app — and its UI strings are English for now because egui's bundled fonts do not cover CJK. Visually verified against the real product config.
+
 - Rust migration, phase 2: `intentroute-core` gains the sing-box configuration builder (loopback-only upstream validation, sanitized outbound tags, canonical-order rule compilation with host/IP/port/protocol semantics, password redaction, password-scrubbed error text) and the CLI gains `build-config` (redacted by default, `--full` only for feeding `sing-box check` via file redirect). The pinned real-sing-box gate now validates the Rust builder output against the official v1.13.19 binary alongside the C# output, and asserts the redacted form never carries the fixture password. 16 new Rust tests bring the core suite to 37.
 
 ## [0.31.0] - 2026-09-13
