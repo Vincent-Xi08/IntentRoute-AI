@@ -1295,6 +1295,16 @@ fn analyze_policy(config: &AppConfig, s: &UiStrings) -> Vec<PolicyFindingGui> {
 
 impl eframe::App for ConsoleApp {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+        self.render_ui(ctx);
+    }
+}
+
+impl ConsoleApp {
+    /// One full UI pass. Called by the eframe event loop and by the
+    /// headless smoke mode (no window, no GPU backend — the egui context
+    /// runs passes against nothing), so both paths exercise exactly the
+    /// same layout and startup logic.
+    fn render_ui(&mut self, ctx: &egui::Context) {
         // Smoke-mode frame proof (inert without the marker environment
         // variable): three rendered frames mean the event loop, panels, and
         // the startup config load all completed.
@@ -2606,6 +2616,14 @@ impl eframe::App for ConsoleApp {
 
 fn main() -> eframe::Result<()> {
     let zh = resolve_language();
+
+    // Headless smoke mode (no window, no GPU backend): drive the exact same
+    // UI passes off-screen so GPU-less CI runners can still prove startup,
+    // config load, fonts, and three full layout passes.
+    if std::env::var_os("INTENTROUTE_GUI_SMOKE_HEADLESS").is_some() {
+        return run_headless_smoke(zh);
+    }
+
     let title = if zh { ZH.title } else { EN.title };
     // Glow (OpenGL) is the default; INTENTROUTE_GUI_RENDERER=wgpu selects the
     // wgpu backend, which falls back to the D3D12 WARP software adapter on
@@ -2637,4 +2655,20 @@ fn main() -> eframe::Result<()> {
             Ok(Box::new(ConsoleApp::new(zh)))
         }),
     )
+}
+
+/// Four off-screen passes against a plain egui context: exercises the same
+/// startup, fonts, and `render_ui` layout the windowed path uses, then
+/// exits zero. The smoke marker (written by `render_ui` on frame three) is
+/// the pass proof.
+fn run_headless_smoke(zh: bool) -> eframe::Result<()> {
+    let ctx = egui::Context::default();
+    if zh {
+        install_cjk_font(&ctx);
+    }
+    let mut app = ConsoleApp::new(zh);
+    for _ in 0..4 {
+        ctx.run(egui::RawInput::default(), |ctx| app.render_ui(ctx));
+    }
+    Ok(())
 }

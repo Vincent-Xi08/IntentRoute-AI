@@ -2,6 +2,11 @@
 param(
     [string]$ExecutablePath,
 
+    # Headless mode: drive the same UI passes off-screen (no window, no GPU
+    # backend) — for GPU-less hosted CI runners. The default windowed mode
+    # additionally asserts the window, its title, and a clean close.
+    [switch]$Headless,
+
     [ValidateRange(5, 120)]
     [int]$LaunchTimeoutSeconds = 45,
 
@@ -55,6 +60,32 @@ $process = $null
 try {
     [Environment]::SetEnvironmentVariable($markerVariable, $markerPath, 'Process')
     [Environment]::SetEnvironmentVariable($rendererVariable, 'wgpu', 'Process')
+    if ($Headless) {
+        [Environment]::SetEnvironmentVariable('INTENTROUTE_GUI_SMOKE_HEADLESS', '1', 'Process')
+    }
+
+    if ($Headless) {
+        # Headless: the app renders its passes off-screen and exits by
+        # itself; the marker plus a clean zero exit prove the startup path.
+        $process = Start-Process -FilePath $resolvedExecutable -WorkingDirectory (Split-Path -Parent $resolvedExecutable) -PassThru
+        if (-not $process.WaitForExit($LaunchTimeoutSeconds * 1000)) {
+            throw "intentroute-gui.exe (headless) did not exit within $LaunchTimeoutSeconds seconds."
+        }
+        if ($process.ExitCode -ne 0) {
+            throw "intentroute-gui.exe (headless) returned exit code $($process.ExitCode).`n$(Get-StartupDiagnostic)"
+        }
+        if (-not (Test-Path -LiteralPath $markerPath -PathType Leaf)) {
+            throw "intentroute-gui.exe (headless) exited cleanly but wrote no render marker.`n$(Get-StartupDiagnostic)"
+        }
+        $marker = (Get-Content -Raw -LiteralPath $markerPath).Trim()
+        if ($marker -notmatch 'rendered=') {
+            throw "Unexpected headless render marker content: '$marker'."
+        }
+        Write-Host "Headless render marker: $marker"
+        Write-Host 'Rust console headless smoke test passed: release binary ran its startup and UI passes and exited cleanly.'
+        return
+    }
+
     $startInfo = [System.Diagnostics.ProcessStartInfo]::new()
     $startInfo.FileName = $resolvedExecutable
     $startInfo.WorkingDirectory = Split-Path -Parent $resolvedExecutable
@@ -146,4 +177,5 @@ finally {
     Remove-Item -LiteralPath $markerPath -Force -ErrorAction SilentlyContinue
     [Environment]::SetEnvironmentVariable($markerVariable, $previousMarkerPath, 'Process')
     [Environment]::SetEnvironmentVariable($rendererVariable, $previousRenderer, 'Process')
+    [Environment]::SetEnvironmentVariable('INTENTROUTE_GUI_SMOKE_HEADLESS', $null, 'Process')
 }

@@ -39,7 +39,9 @@ jobs:
 
       - name: Smoke test Rust console GUI
         shell: pwsh
-        run: ./scripts/smoke-test-rust-gui.ps1
+        # Headless: hosted runners expose no GPU adapter for any backend, so
+        # the same UI passes are driven off-screen instead of in a window.
+        run: ./scripts/smoke-test-rust-gui.ps1 -Headless
 
       - name: Validate builder output with pinned real sing-box
         shell: pwsh
