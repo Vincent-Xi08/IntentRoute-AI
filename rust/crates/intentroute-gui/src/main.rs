@@ -129,6 +129,9 @@ struct UiStrings {
     server_bad_host: &'static str,
     server_bad_port: &'static str,
     server_enabled_label: &'static str,
+    // Rule move (parity slice 4)
+    move_up: &'static str,
+    move_down: &'static str,
 }
 
 const ZH: UiStrings = UiStrings {
@@ -212,6 +215,8 @@ const ZH: UiStrings = UiStrings {
     server_bad_host: "仅支持字面量回环 IP（如 127.0.0.1 或 ::1）",
     server_bad_port: "端口必须在 1–65535 之间",
     server_enabled_label: "启用",
+    move_up: "上移",
+    move_down: "下移",
 };
 
 const EN: UiStrings = UiStrings {
@@ -295,6 +300,8 @@ const EN: UiStrings = UiStrings {
     server_bad_host: "only a literal loopback IP such as 127.0.0.1 or ::1 is supported",
     server_bad_port: "port must be 1–65535",
     server_enabled_label: "enabled",
+    move_up: "move up",
+    move_down: "move down",
 };
 
 /// Constraint error names from the core are English; map to Chinese for the
@@ -464,6 +471,10 @@ enum PendingEdit {
     /// enabled); the engine re-validates loopback + port and re-encrypts the
     /// password on commit.
     UpdateServer { server_id: String, server: ProxyServerEdit },
+    /// Move a rule up (-1) or down (+1) in Canonical Runtime Order, exactly
+    /// like the WPF MoveRule: swap in canonical order, rewrite the persisted
+    /// list in that order, and reassign priorities as (i+1)*10.
+    MoveRule { rule_id: String, delta: i32 },
 }
 
 #[derive(Clone)]
@@ -746,6 +757,23 @@ impl ConsoleApp {
                         target.enabled = server.enabled;
                     }
                 }
+                PendingEdit::MoveRule { rule_id, delta } => {
+                    // WPF MoveRule parity: swap in canonical order (all rules,
+                    // not just enabled), rewrite persisted order, reassign
+                    // priorities as (i+1)*10. Out-of-range moves are no-ops.
+                    let ordered = canonical_order(candidate.rules.clone());
+                    if let Some(index) = ordered.iter().position(|r| &r.id == rule_id) {
+                        let new_index = index as i32 + delta;
+                        if new_index >= 0 && (new_index as usize) < ordered.len() {
+                            let mut reordered = ordered;
+                            reordered.swap(index, new_index as usize);
+                            candidate.rules = reordered;
+                            for (i, rule) in candidate.rules.iter_mut().enumerate() {
+                                rule.priority = (i as i32 + 1) * 10;
+                            }
+                        }
+                    }
+                }
             })
         });
 
@@ -939,6 +967,19 @@ impl eframe::App for ConsoleApp {
                             }
                             if ui.button(s.edit_constraints).clicked() {
                                 open_constraints = Some(rule.id.clone());
+                            }
+                            ui.separator();
+                            if ui.button(s.move_up).clicked() {
+                                requested_edit = Some(PendingEdit::MoveRule {
+                                    rule_id: rule.id.clone(),
+                                    delta: -1,
+                                });
+                            }
+                            if ui.button(s.move_down).clicked() {
+                                requested_edit = Some(PendingEdit::MoveRule {
+                                    rule_id: rule.id.clone(),
+                                    delta: 1,
+                                });
                             }
                             ui.separator();
                             if ui.button(RichText::new(s.delete_rule).color(RED)).clicked() {
@@ -1171,6 +1212,7 @@ impl eframe::App for ConsoleApp {
                 PendingEdit::UpdateConstraints { .. }
                     | PendingEdit::AddRule { .. }
                     | PendingEdit::UpdateServer { .. }
+                    | PendingEdit::MoveRule { .. }
             );
             let message = match &edit {
                 PendingEdit::ToggleEnabled { rule_id } => {
@@ -1202,6 +1244,7 @@ impl eframe::App for ConsoleApp {
                 }
                 PendingEdit::AddRule { .. } => String::new(),
                 PendingEdit::UpdateServer { .. } => String::new(),
+                PendingEdit::MoveRule { .. } => String::new(),
             };
             if !needs_dialog {
                 let edit = self.pending_edit.take().unwrap();
