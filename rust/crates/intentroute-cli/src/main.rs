@@ -4,6 +4,7 @@
 //!   check <rules.json>                        validate every rule's constraint lists
 //!   import-preview <rules.json> [existing]    classify the import against existing rules
 //!   order <rules.json>                        print the Canonical Runtime Order
+//!   policy <rules.json>                       print shadowing/overlap/broad-scope findings
 //!   build-config <config.json> [--full]       emit the sing-box configuration
 //!
 //! <rules.json> may be either a rule export envelope ({"Rules": [...]}) or a
@@ -25,6 +26,7 @@ fn main() -> ExitCode {
     match args.as_slice() {
         [cmd, path] if cmd == "check" => run_check(path),
         [cmd, path] if cmd == "order" => run_order(path),
+        [cmd, path] if cmd == "policy" => run_policy(path),
         [cmd, path] if cmd == "import-preview" => run_import_preview(path, None),
         [cmd, path, existing] if cmd == "import-preview" => {
             run_import_preview(path, Some(existing))
@@ -36,6 +38,7 @@ fn main() -> ExitCode {
         _ => {
             eprintln!("usage: intentroute check <rules.json>");
             eprintln!("       intentroute order <rules.json>");
+            eprintln!("       intentroute policy <rules.json>");
             eprintln!("       intentroute import-preview <rules.json> [existing-config.json]");
             eprintln!("       intentroute build-config <config.json> [--full]");
             ExitCode::from(2)
@@ -145,6 +148,32 @@ fn run_order(path: &str) -> ExitCode {
             rule.mode.name()
         );
     }
+    ExitCode::SUCCESS
+}
+
+fn run_policy(path: &str) -> ExitCode {
+    let rules = match load_rules(path) {
+        Ok(rules) => rules,
+        Err(error) => {
+            eprintln!("error: {error}");
+            return ExitCode::from(2);
+        }
+    };
+
+    let findings = intentroute_core::policy_findings::analyze(&rules);
+    if findings.is_empty() {
+        println!("no shadowing, overlap, or broad-scope findings");
+        return ExitCode::SUCCESS;
+    }
+    for finding in &findings {
+        let severity = match finding.severity {
+            intentroute_core::policy_findings::Severity::Critical => "CRITICAL",
+            intentroute_core::policy_findings::Severity::Warning => "WARNING",
+            intentroute_core::policy_findings::Severity::Info => "INFO",
+        };
+        println!("{:<8} {}  {}", severity, finding.code, finding.detail);
+    }
+    println!("\n{} finding(s)", findings.len());
     ExitCode::SUCCESS
 }
 

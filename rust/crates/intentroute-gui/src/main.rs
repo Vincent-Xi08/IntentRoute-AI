@@ -147,6 +147,7 @@ struct UiStrings {
     finding_count_fmt: &'static str, // {count}
     finding_shadow: &'static str,
     finding_broad: &'static str,
+    finding_overlap: &'static str,
     // Route simulator (parity slice 6)
     sim_toggle: &'static str,
     sim_title: &'static str,
@@ -270,6 +271,7 @@ const ZH: UiStrings = UiStrings {
     finding_count_fmt: "共 {count} 项发现",
     finding_shadow: "规则不可达（被更早的规则遮蔽）",
     finding_broad: "范围过宽（无目标约束）",
+    finding_overlap: "范围部分重叠（非证明提示）",
     sim_toggle: "路由推演",
     sim_title: "路由推演（严格静态 what-if，不解析 DNS、不探测、不观察流量）",
     sim_process: "进程名",
@@ -390,6 +392,7 @@ const EN: UiStrings = UiStrings {
     finding_count_fmt: "{count} finding(s)",
     finding_shadow: "rule unreachable (shadowed by an earlier rule)",
     finding_broad: "broad scope (no destination constraints)",
+    finding_overlap: "partially overlapping scopes (unproven hint)",
     sim_toggle: "route simulator",
     sim_title: "route simulator (strict static what-if — no DNS, no probes, no traffic)",
     sim_process: "process",
@@ -1049,6 +1052,7 @@ fn analyze_policy(config: &AppConfig, s: &UiStrings) -> Vec<PolicyFindingGui> {
             kind: match finding.code {
                 "PIR-SHADOW" => s.finding_shadow,
                 "PIR-BROAD" => s.finding_broad,
+                "PIR-OVERLAP" => s.finding_overlap,
                 _ => finding.code,
             },
             detail: finding.detail,

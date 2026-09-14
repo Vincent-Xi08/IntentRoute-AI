@@ -1,15 +1,18 @@
-//! Shadowing and broad-scope detection for the policy check panel
-//! (parity slice 9). This ports the highest-value findings from the WPF
-//! `PolicyIntelligence` engine:
+//! Shadowing, broad-scope, and partial-overlap detection for the policy
+//! check panel (parity slices 9–10). This ports the highest-value findings
+//! from the WPF `PolicyIntelligence` engine:
 //!
 //! - **Shadowing**: an enabled rule can never match because an earlier rule
 //!   in canonical order covers everything it covers (process is a superset,
 //!   domains/IPs/ports contain, protocol includes).
 //! - **Broad scope**: an enabled rule has no destination constraints at all
 //!   (no hosts, IPs, or ports), so it covers all traffic for its process.
-//!
-//! Both are proven exact-superset relations — the WPF engine additionally
-//! proves partial overlaps (containment hints), which remain WPF-only.
+//! - **Partial overlap**: two enabled rules provably intersect without
+//!   either covering the other. Shared traffic hits the earlier rule. This
+//!   is a hint, not a shadowing/conflict proof — traffic outside the
+//!   intersection still follows each rule's own scope. Domain versus IP
+//!   constraints can never be proven to intersect, and domains/IPs are each
+//!   only proven via tree containment (one token contains the other).
 
 use crate::rule::ProxyRule;
 use crate::runtime_order::canonical_order;
@@ -74,16 +77,54 @@ pub fn analyze(rules: &[ProxyRule]) -> Vec<Finding> {
         }
     }
 
+    // Partial overlap: provable intersection without containment in either
+    // direction. Every overlapping pair is reported (not just the first).
+    for later_index in 1..ordered.len() {
+        for earlier_index in 0..later_index {
+            let earlier = &ordered[earlier_index];
+            let later = &ordered[later_index];
+            if shadows(earlier, later) || shadows(later, earlier) {
+                continue;
+            }
+            if !partial_overlap(earlier, later) {
+                continue;
+            }
+            let same_mode = earlier.mode == later.mode;
+            findings.push(Finding {
+                code: "PIR-OVERLAP",
+                severity: if same_mode { Severity::Info } else { Severity::Warning },
+                detail: format!(
+                    "#{} {} and #{} {} provably intersect but neither covers the other; shared traffic hits #{} first",
+                    earlier_index + 1,
+                    earlier.exe_name,
+                    later_index + 1,
+                    later.exe_name,
+                    earlier_index + 1
+                ),
+            });
+        }
+    }
+
     findings
 }
 
 /// True when `earlier` covers every input `later` would match.
 fn shadows(earlier: &ProxyRule, later: &ProxyRule) -> bool {
     process_covers(earlier, later)
-        && (earlier.target_hosts.trim().is_empty() || hosts_cover(earlier, later))
-        && (earlier.target_ips.trim().is_empty() || ips_cover(earlier, later))
-        && (earlier.target_ports.trim().is_empty() || ports_cover(earlier, later))
         && protocol_covers(earlier, later)
+        && ports_cover(earlier, later)
+        && destinations_cover(earlier, later)
+}
+
+/// True when the two rules provably intersect without either covering the
+/// other. An empty destination constraint set on either side means that
+/// dimension intersects everything; constrained sides intersect only via
+/// tree containment (domain or IP), never domain-versus-IP.
+fn partial_overlap(a: &ProxyRule, b: &ProxyRule) -> bool {
+    process_may_overlap(a, b)
+        && protocol_overlaps(a, b)
+        && ports_overlap(a, b)
+        && destinations_overlap(a, b)
 }
 
 fn process_covers(earlier: &ProxyRule, later: &ProxyRule) -> bool {
@@ -104,13 +145,67 @@ fn protocol_covers(earlier: &ProxyRule, later: &ProxyRule) -> bool {
     }
 }
 
+fn protocol_overlaps(a: &ProxyRule, b: &ProxyRule) -> bool {
+    let p = |r: &ProxyRule| r.protocol.trim().to_uppercase();
+    let (x, y) = (p(a), p(b));
+    let unrestricted = |s: &str| s.is_empty() || s == "BOTH" || s == "TCP/UDP";
+    unrestricted(&x) || unrestricted(&y) || x == y
+}
+
+fn process_may_overlap(a: &ProxyRule, b: &ProxyRule) -> bool {
+    let x = a.exe_name.trim();
+    let y = b.exe_name.trim();
+    x == "*" || y == "*" || x.eq_ignore_ascii_case(y)
+}
+
+/// Hosts and IPs form one destination dimension: a rule is destination-
+/// filtered when either list is non-empty. An unfiltered earlier covers any
+/// later; a filtered earlier cannot cover an unfiltered later. With both
+/// filtered, every later host and IP token must be covered, independently
+/// per list (an empty list is vacuously covered).
+fn destinations_cover(earlier: &ProxyRule, later: &ProxyRule) -> bool {
+    let earlier_filtered = has_destination_filter(earlier);
+    let later_filtered = has_destination_filter(later);
+    if !earlier_filtered {
+        return true;
+    }
+    if !later_filtered {
+        return false;
+    }
+    hosts_cover(earlier, later) && ips_cover(earlier, later)
+}
+
+fn destinations_overlap(a: &ProxyRule, b: &ProxyRule) -> bool {
+    if !has_destination_filter(a) || !has_destination_filter(b) {
+        return true;
+    }
+    let a_hosts = split_list(&a.target_hosts);
+    let b_hosts = split_list(&b.target_hosts);
+    let domains_overlap = a_hosts.iter().any(|ah| {
+        b_hosts
+            .iter()
+            .any(|bh| host_token_covers(ah, bh) || host_token_covers(bh, ah))
+    });
+    let a_ips = split_list(&a.target_ips);
+    let b_ips = split_list(&b.target_ips);
+    let networks_overlap = a_ips.iter().any(|ai| {
+        b_ips
+            .iter()
+            .any(|bi| ip_token_covers(ai, bi) || ip_token_covers(bi, ai))
+    });
+    domains_overlap || networks_overlap
+}
+
+fn has_destination_filter(rule: &ProxyRule) -> bool {
+    !rule.target_hosts.trim().is_empty() || !rule.target_ips.trim().is_empty()
+}
+
 fn hosts_cover(earlier: &ProxyRule, later: &ProxyRule) -> bool {
     let earlier_tokens = split_list(&earlier.target_hosts);
-    // Unrestricted earlier matches everything — but that case is handled
-    // by the caller's `is_empty()` fast path, so here earlier has tokens.
     let later_tokens = split_list(&later.target_hosts);
-    // Later unrestricted: earlier must also be unrestricted (already handled).
-    // Later has tokens: every later token must be covered by an earlier token.
+    // Called only when both rules are destination-filtered: an empty later
+    // host list is vacuously covered; otherwise every later token needs an
+    // earlier token covering it (an empty earlier list covers nothing).
     later_tokens.is_empty()
         || later_tokens.iter().all(|lt| {
             earlier_tokens.iter().any(|et| host_token_covers(et, lt))
@@ -136,9 +231,7 @@ fn ips_cover(earlier: &ProxyRule, later: &ProxyRule) -> bool {
         || later_tokens.iter().all(|lt| {
             earlier_tokens.iter().any(|et| ip_token_covers(et, lt))
         })
-}
-
-fn ip_token_covers(earlier: &str, later: &str) -> bool {
+}fn ip_token_covers(earlier: &str, later: &str) -> bool {
     let Some((e_addr, e_prefix)) = parse_cidr(earlier) else {
         return earlier.trim() == later.trim(); // bare exact match
     };
@@ -167,11 +260,31 @@ fn ip_token_covers(earlier: &str, later: &str) -> bool {
 
 fn ports_cover(earlier: &ProxyRule, later: &ProxyRule) -> bool {
     let earlier_tokens = split_list(&earlier.target_ports);
+    if earlier_tokens.is_empty() {
+        return true; // earlier unrestricted
+    }
     let later_tokens = split_list(&later.target_ports);
-    later_tokens.is_empty()
-        || later_tokens.iter().all(|lt| {
-            earlier_tokens.iter().any(|et| port_token_covers(et, lt))
+    if later_tokens.is_empty() {
+        return false; // earlier restricted cannot cover an unrestricted later
+    }
+    later_tokens.iter().all(|lt| {
+        earlier_tokens.iter().any(|et| port_token_covers(et, lt))
+    })
+}
+
+fn ports_overlap(a: &ProxyRule, b: &ProxyRule) -> bool {
+    let a_tokens = split_list(&a.target_ports);
+    let b_tokens = split_list(&b.target_ports);
+    if a_tokens.is_empty() || b_tokens.is_empty() {
+        return true;
+    }
+    a_tokens.iter().any(|at| {
+        let (a_start, a_end) = parse_port_range(at);
+        b_tokens.iter().any(|bt| {
+            let (b_start, b_end) = parse_port_range(bt);
+            a_start <= b_end && b_start <= a_end
         })
+    })
 }
 
 fn port_token_covers(earlier: &str, later: &str) -> bool {
@@ -215,27 +328,6 @@ fn v4_mask(prefix: u32) -> u32 {
         0
     } else {
         u32::MAX << (32 - prefix.min(32))
-    }
-}
-
-fn in_v4_cidr(net: IpAddr, prefix: u32, ip: IpAddr) -> bool {
-    if let (IpAddr::V4(n), IpAddr::V4(i)) = (net, ip) {
-        let mask = v4_mask(prefix);
-        (u32::from(n) & mask) == (u32::from(i) & mask)
-    } else {
-        false
-    }
-}
-
-fn in_v6_cidr(net: IpAddr, prefix: u32, ip: IpAddr) -> bool {
-    if let (IpAddr::V6(n), IpAddr::V6(i)) = (net, ip) {
-        if prefix == 0 {
-            return true;
-        }
-        let shift = 128 - prefix.min(128);
-        (u128::from(n) >> shift) == (u128::from(i) >> shift)
-    } else {
-        false
     }
 }
 
@@ -355,5 +447,158 @@ mod tests {
         let mut udp = rule("app.exe", 20);
         udp.protocol = "UDP".into();
         assert!(!analyze(&[tcp, udp]).iter().any(|f| f.code == "PIR-SHADOW"));
+    }
+
+    // ---- partial overlap (parity slice 10) ----
+
+    #[test]
+    fn overlap_same_mode_is_info() {
+        let mut wide = rule("app.exe", 10);
+        wide.target_hosts = "*.github.com".into();
+        let mut mixed = rule("app.exe", 20);
+        mixed.target_hosts = "api.github.com,gitlab.com".into();
+        let findings = analyze(&[wide, mixed]);
+        let overlap = findings
+            .iter()
+            .find(|f| f.code == "PIR-OVERLAP")
+            .expect("partial overlap expected");
+        assert_eq!(overlap.severity, Severity::Info);
+        assert!(!findings.iter().any(|f| f.code == "PIR-SHADOW"));
+    }
+
+    #[test]
+    fn overlap_different_mode_is_warning() {
+        let mut wide = rule("app.exe", 10);
+        wide.target_hosts = "*.github.com".into();
+        let mut mixed = rule("app.exe", 20);
+        mixed.target_hosts = "api.github.com,gitlab.com".into();
+        mixed.mode = ProxyMode::Proxy;
+        let findings = analyze(&[wide, mixed]);
+        let overlap = findings
+            .iter()
+            .find(|f| f.code == "PIR-OVERLAP")
+            .expect("partial overlap expected");
+        assert_eq!(overlap.severity, Severity::Warning);
+    }
+
+    #[test]
+    fn no_overlap_for_disjoint_hosts() {
+        let mut first = rule("app.exe", 10);
+        first.target_hosts = "github.com".into();
+        let mut second = rule("app.exe", 20);
+        second.target_hosts = "gitlab.com".into();
+        assert!(!analyze(&[first, second]).iter().any(|f| f.code == "PIR-OVERLAP"));
+    }
+
+    #[test]
+    fn no_overlap_between_domain_and_ip_constraints() {
+        let mut host_rule = rule("app.exe", 10);
+        host_rule.target_hosts = "github.com".into();
+        let mut ip_rule = rule("app.exe", 20);
+        ip_rule.target_ips = "10.0.0.0/8".into();
+        // A domain constraint and an IP constraint can never be proven to
+        // intersect, so no overlap finding is emitted.
+        assert!(!analyze(&[host_rule, ip_rule]).iter().any(|f| f.code == "PIR-OVERLAP"));
+    }
+
+    #[test]
+    fn overlap_via_ip_superset_with_extra_token() {
+        let mut wide = rule("app.exe", 10);
+        wide.target_ips = "10.0.0.0/8".into();
+        let mut mixed = rule("app.exe", 20);
+        mixed.target_ips = "10.5.0.0/16,1.2.3.4".into();
+        let findings = analyze(&[wide, mixed]);
+        // The /8 contains the /16 token but not the bare 1.2.3.4 token, so
+        // neither side contains the other while the /16 proves intersection.
+        assert!(findings.iter().any(|f| f.code == "PIR-OVERLAP"));
+        assert!(!findings.iter().any(|f| f.code == "PIR-SHADOW"));
+    }
+
+    #[test]
+    fn overlap_via_port_intersection() {
+        let mut first = rule("app.exe", 10);
+        first.target_ports = "80-90".into();
+        let mut second = rule("app.exe", 20);
+        second.target_ports = "85-95".into();
+        let findings = analyze(&[first, second]);
+        assert!(findings.iter().any(|f| f.code == "PIR-OVERLAP"));
+        assert!(!findings.iter().any(|f| f.code == "PIR-SHADOW"));
+    }
+
+    #[test]
+    fn overlap_not_reported_for_disjoint_ports() {
+        let mut first = rule("app.exe", 10);
+        first.target_ports = "80".into();
+        let mut second = rule("app.exe", 20);
+        second.target_ports = "443".into();
+        assert!(!analyze(&[first, second]).iter().any(|f| f.code == "PIR-OVERLAP"));
+    }
+
+    #[test]
+    fn overlap_skipped_when_exact_duplicates() {
+        let mut first = rule("app.exe", 10);
+        first.target_hosts = "github.com".into();
+        let mut second = rule("app.exe", 20);
+        second.target_hosts = "github.com".into();
+        let findings = analyze(&[first, second]);
+        // Exact containment in both directions reports shadowing only.
+        assert!(findings.iter().any(|f| f.code == "PIR-SHADOW"));
+        assert!(!findings.iter().any(|f| f.code == "PIR-OVERLAP"));
+    }
+
+    #[test]
+    fn overlap_cross_process_only_via_global() {
+        let mut global = rule("*", 10);
+        global.target_hosts = "*.github.com".into();
+        let mut other = rule("app.exe", 20);
+        other.target_hosts = "api.github.com,gitlab.com".into();
+        // The global *.github.com matcher covers api.github.com but not
+        // gitlab.com, so the per-process rule neither shadows it nor is
+        // shadowed: they provably share api.github.com traffic.
+        let findings = analyze(&[global, other]);
+        assert!(findings.iter().any(|f| f.code == "PIR-OVERLAP"));
+        assert!(!findings.iter().any(|f| f.code == "PIR-SHADOW"));
+    }
+
+    // ---- containment-direction regressions (fixed with slice 10) ----
+    // A restricted earlier rule followed by an unrestricted later rule is
+    // reverse containment: the later superset cannot shadow what runs first,
+    // and the WPF engine stays silent on such pairs — only the earlier rule
+    // still wins the shared traffic, which is the intended order anyway.
+
+    #[test]
+    fn no_shadow_when_earlier_port_restricted_and_later_not() {
+        let mut earlier = rule("app.exe", 10);
+        earlier.target_ports = "443".into();
+        let later = rule("app.exe", 20);
+        let findings = analyze(&[earlier, later]);
+        // Earlier only covers port 443; the unrestricted later also matches
+        // port 80, so the later rule is NOT shadowed (slice-9 false positive).
+        assert!(!findings.iter().any(|f| f.code == "PIR-SHADOW"));
+        assert!(!findings.iter().any(|f| f.code == "PIR-OVERLAP"));
+    }
+
+    #[test]
+    fn no_shadow_when_earlier_host_restricted_and_later_not() {
+        let mut earlier = rule("app.exe", 10);
+        earlier.target_hosts = "github.com".into();
+        let later = rule("app.exe", 20);
+        let findings = analyze(&[earlier, later]);
+        assert!(!findings.iter().any(|f| f.code == "PIR-SHADOW"));
+        assert!(!findings.iter().any(|f| f.code == "PIR-OVERLAP"));
+    }
+
+    #[test]
+    fn shadow_still_holds_when_earlier_unrestricted_ports() {
+        let mut earlier = rule("app.exe", 10);
+        earlier.target_hosts = "*.github.com".into();
+        let mut later = rule("app.exe", 20);
+        later.target_hosts = "api.github.com".into();
+        later.target_ports = "443".into();
+        // Earlier covers all destinations including api.github.com on every
+        // port, so the port-restricted later rule remains fully shadowed.
+        let findings = analyze(&[earlier, later]);
+        assert!(findings.iter().any(|f| f.code == "PIR-SHADOW"));
+        assert!(!findings.iter().any(|f| f.code == "PIR-OVERLAP"));
     }
 }
