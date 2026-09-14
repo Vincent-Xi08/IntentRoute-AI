@@ -158,6 +158,10 @@ struct UiStrings {
     sim_result_matched_fmt: &'static str, // {rule} {mode}
     sim_result_fallback: &'static str,
     sim_result_invalid: &'static str,
+    // Global mode (parity slice 7)
+    global_direct: &'static str,
+    global_proxy: &'static str,
+    global_confirm_fmt: &'static str, // {mode}
 }
 
 const ZH: UiStrings = UiStrings {
@@ -267,6 +271,9 @@ const ZH: UiStrings = UiStrings {
     sim_result_matched_fmt: "命中规则 {rule} → {mode}",
     sim_result_fallback: "无规则命中（全局回退）",
     sim_result_invalid: "查询无效",
+    global_direct: "默认直连",
+    global_proxy: "默认代理",
+    global_confirm_fmt: "将全局模式切换为 {mode}？这影响所有未命中规则的流量走向。",
 };
 
 const EN: UiStrings = UiStrings {
@@ -376,6 +383,9 @@ const EN: UiStrings = UiStrings {
     sim_result_matched_fmt: "matched rule {rule} → {mode}",
     sim_result_fallback: "no rule matched (global fallback)",
     sim_result_invalid: "invalid query",
+    global_direct: "default direct",
+    global_proxy: "default proxy",
+    global_confirm_fmt: "switch global mode to {mode}? This affects traffic that no rule matches.",
 };
 
 /// Constraint error names from the core are English; map to Chinese for the
@@ -558,6 +568,8 @@ enum PendingEdit {
     /// like the WPF MoveRule: swap in canonical order, rewrite the persisted
     /// list in that order, and reassign priorities as (i+1)*10.
     MoveRule { rule_id: String, delta: i32 },
+    /// Switch the global mode (ProxyAll ↔ DirectAll).
+    SetGlobalMode { mode: GlobalMode },
 }
 
 #[derive(Clone)]
@@ -865,6 +877,9 @@ impl ConsoleApp {
                             }
                         }
                     }
+                }
+                PendingEdit::SetGlobalMode { mode } => {
+                    candidate.global_mode = *mode;
                 }
             })
         });
@@ -1402,6 +1417,24 @@ impl eframe::App for ConsoleApp {
                 if ui.button(s.sim_toggle).clicked() {
                     self.sim_open = !self.sim_open;
                 }
+                // Global mode display + toggle (parity slice 7): showing the
+                // current persisted mode; clicking offers the other one behind
+                // a confirmation dialog that runs the locked transaction.
+                if let Some(config) = &self.config {
+                    let current_label = match config.global_mode {
+                        GlobalMode::ProxyAll => s.global_proxy,
+                        GlobalMode::DirectAll => s.global_direct,
+                    };
+                    let next_mode = match config.global_mode {
+                        GlobalMode::ProxyAll => GlobalMode::DirectAll,
+                        GlobalMode::DirectAll => GlobalMode::ProxyAll,
+                    };
+                    ui.separator();
+                    ui.label(RichText::new(current_label).color(MUTED).small());
+                    if ui.button(RichText::new("⇄").strong()).clicked() {
+                        self.pending_edit = Some(PendingEdit::SetGlobalMode { mode: next_mode });
+                    }
+                }
             });
             ui.add_space(6.0);
 
@@ -1590,6 +1623,13 @@ impl eframe::App for ConsoleApp {
                 PendingEdit::AddRule { .. } => String::new(),
                 PendingEdit::UpdateServer { .. } => String::new(),
                 PendingEdit::MoveRule { .. } => String::new(),
+                PendingEdit::SetGlobalMode { mode } => {
+                    let mode_label = match mode {
+                        GlobalMode::ProxyAll => s.global_proxy,
+                        GlobalMode::DirectAll => s.global_direct,
+                    };
+                    s.global_confirm_fmt.replace("{mode}", mode_label)
+                }
             };
             if !needs_dialog {
                 let edit = self.pending_edit.take().unwrap();
