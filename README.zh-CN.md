@@ -179,6 +179,7 @@ IntentRoute AI **不**提供代理节点、VPN 账号、抓包驱动、内置 AI
 以下深度文档为英文（术语与界面一致，可直接对照）：
 
 - [架构](docs/ARCHITECTURE.md)（英文）
+- [Rust 控制台对等评估](docs/RUST_PARITY.md)（换壳决策依据，中文）
 - [威胁模型](docs/THREAT_MODEL.md)（英文）
 - [安全政策](SECURITY.md)（英文）
 - [AI v0.2.0 设计](docs/plans/2026-08-25-intentroute-ai-design.md)（英文）

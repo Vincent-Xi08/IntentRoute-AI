@@ -37,6 +37,10 @@ jobs:
         shell: pwsh
         run: ./scripts/test-rust.ps1
 
+      - name: Smoke test Rust console GUI
+        shell: pwsh
+        run: ./scripts/smoke-test-rust-gui.ps1
+
       - name: Validate builder output with pinned real sing-box
         shell: pwsh
         run: ./scripts/test-pinned-sing-box.ps1
@@ -70,4 +74,11 @@ jobs:
         with:
           name: IntentRoute-AI-win-x64
           path: ${{ runner.temp }}/IntentRoute-AI-win-x64/
+          if-no-files-found: error
+
+      - name: Upload Rust console preview (migration)
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: IntentRoute-AI-rust-console
+          path: rust/target/release/intentroute-gui.exe
           if-no-files-found: error

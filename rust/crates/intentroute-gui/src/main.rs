@@ -201,7 +201,7 @@ struct UiStrings {
 }
 
 const ZH: UiStrings = UiStrings {
-    title: "IntentRoute AI — 规则控制台（只读）",
+    title: "IntentRoute AI — 规则控制台",
     file: "文件",
     open: "打开… (Ctrl+O)",
     reload: "重新加载 (F5)",
@@ -346,7 +346,7 @@ const ZH: UiStrings = UiStrings {
 };
 
 const EN: UiStrings = UiStrings {
-    title: "IntentRoute AI — rules console (read-only)",
+    title: "IntentRoute AI — rules console",
     file: "file",
     open: "open… (Ctrl+O)",
     reload: "reload (F5)",
@@ -652,6 +652,11 @@ struct ConsoleApp {
     monitor_min_level: intentroute_core::runtime_log::LogLevel,
     monitor_search: String,
     monitor_auto_scroll: bool,
+    // Smoke-mode support: when INTENTROUTE_GUI_SMOKE_MARKER names a path,
+    // the app writes a marker file after three rendered frames so a launch
+    // gate can prove the render loop actually runs. Inert otherwise.
+    smoke_marker: Option<PathBuf>,
+    smoke_frames: u32,
 }
 
 /// One confirmed edit intention; performed under the management lock.
@@ -764,6 +769,8 @@ impl ConsoleApp {
             monitor_min_level: intentroute_core::runtime_log::LogLevel::Info,
             monitor_search: String::new(),
             monitor_auto_scroll: true,
+            smoke_marker: std::env::var_os("INTENTROUTE_GUI_SMOKE_MARKER").map(PathBuf::from),
+            smoke_frames: 0,
         };
         if let Some(appdata) = std::env::var_os("APPDATA") {
             let default = PathBuf::from(appdata).join("IntentRouteAI").join("config.json");
@@ -1288,6 +1295,25 @@ fn analyze_policy(config: &AppConfig, s: &UiStrings) -> Vec<PolicyFindingGui> {
 
 impl eframe::App for ConsoleApp {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+        // Smoke-mode frame proof (inert without the marker environment
+        // variable): three rendered frames mean the event loop, panels, and
+        // the startup config load all completed.
+        if let Some(marker) = self.smoke_marker.take() {
+            self.smoke_frames += 1;
+            if self.smoke_frames >= 3 {
+                let _ = std::fs::write(
+                    &marker,
+                    format!(
+                        "rendered={}\nconfig_loaded={}\n",
+                        self.smoke_frames,
+                        self.config.is_some()
+                    ),
+                );
+            } else {
+                self.smoke_marker = Some(marker);
+            }
+        }
+
         let mut visuals = egui::Visuals::dark();
         visuals.panel_fill = BG;
         visuals.window_fill = CARD;
