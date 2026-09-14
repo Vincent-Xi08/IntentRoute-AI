@@ -145,6 +145,8 @@ struct UiStrings {
     finding_global_proxy: &'static str,
     finding_clean: &'static str,
     finding_count_fmt: &'static str, // {count}
+    finding_shadow: &'static str,
+    finding_broad: &'static str,
     // Route simulator (parity slice 6)
     sim_toggle: &'static str,
     sim_title: &'static str,
@@ -266,6 +268,8 @@ const ZH: UiStrings = UiStrings {
     finding_global_proxy: "全局代理但无可用服务器",
     finding_clean: "未发现可确定的问题。",
     finding_count_fmt: "共 {count} 项发现",
+    finding_shadow: "规则不可达（被更早的规则遮蔽）",
+    finding_broad: "范围过宽（无目标约束）",
     sim_toggle: "路由推演",
     sim_title: "路由推演（严格静态 what-if，不解析 DNS、不探测、不观察流量）",
     sim_process: "进程名",
@@ -384,6 +388,8 @@ const EN: UiStrings = UiStrings {
     finding_global_proxy: "global proxy mode without an available server",
     finding_clean: "No determinable issues found.",
     finding_count_fmt: "{count} finding(s)",
+    finding_shadow: "rule unreachable (shadowed by an earlier rule)",
+    finding_broad: "broad scope (no destination constraints)",
     sim_toggle: "route simulator",
     sim_title: "route simulator (strict static what-if — no DNS, no probes, no traffic)",
     sim_process: "process",
@@ -984,8 +990,7 @@ fn analyze_policy(config: &AppConfig, s: &UiStrings) -> Vec<PolicyFindingGui> {
     let mut findings = Vec::new();
 
     // Identity duplicates: same full identity key (case-insensitive).
-    let mut seen: std::collections::HashMap<String, &str> =
-        std::collections::HashMap::new();
+    let mut seen: std::collections::HashMap<String, &str> = std::collections::HashMap::new();
     for rule in &config.rules {
         let key = rule_identity_key(rule).to_lowercase();
         if let Some(first) = seen.get(key.as_str()) {
@@ -999,17 +1004,11 @@ fn analyze_policy(config: &AppConfig, s: &UiStrings) -> Vec<PolicyFindingGui> {
         }
     }
 
-    let has_enabled_server = config
-        .proxy_servers
-        .iter()
-        .any(|srv| srv.enabled);
+    let has_enabled_server = config.proxy_servers.iter().any(|srv| srv.enabled);
 
     // Proxy rules without a usable server.
     for rule in &config.rules {
-        if rule.is_enabled
-            && rule.mode == ProxyMode::Proxy
-            && !has_enabled_server
-        {
+        if rule.is_enabled && rule.mode == ProxyMode::Proxy && !has_enabled_server {
             findings.push(PolicyFindingGui {
                 severity: PolicySeverity::Critical,
                 kind: s.finding_no_server,
@@ -1036,6 +1035,24 @@ fn analyze_policy(config: &AppConfig, s: &UiStrings) -> Vec<PolicyFindingGui> {
                 detail: format!("{} → {}", rule.exe_name, rule.proxy_chain_id),
             });
         }
+    }
+
+    // Shadowing + broad scope (parity slice 9).
+    for finding in intentroute_core::policy_findings::analyze(&config.rules) {
+        let severity = match finding.severity {
+            intentroute_core::policy_findings::Severity::Critical => PolicySeverity::Critical,
+            intentroute_core::policy_findings::Severity::Warning => PolicySeverity::Warning,
+            intentroute_core::policy_findings::Severity::Info => PolicySeverity::Warning,
+        };
+        findings.push(PolicyFindingGui {
+            severity,
+            kind: match finding.code {
+                "PIR-SHADOW" => s.finding_shadow,
+                "PIR-BROAD" => s.finding_broad,
+                _ => finding.code,
+            },
+            detail: finding.detail,
+        });
     }
 
     findings

@@ -196,7 +196,8 @@ The roadmap is evidence-driven. Items move forward when implementation, tests, a
 - [x] Parity slice 6 (2026-09-14): route decision simulator — core `route_sim` module (10 tests: match/fallback/invalid across process, domain, IP-CIDR, port, protocol, ordering, disabled-skip) + console panel; live-verified matched-rule and invalid-query results
 - [x] Parity slice 7 (2026-09-14): global mode toggle — inline current-mode display + ⇄ button with traffic-impact confirmation dialog, committed through the management-locked transaction; live-verified toggle + restore
 - [x] Parity slice 8 (2026-09-14): process list page — core `process` module (Toolhelp32 W-binding FFI, path query, 3 tests) + console panel with search, reload, and per-process add-as-rule through the locked transaction; live-verified with real process snapshot
-- [ ] Phase 3 final: monitor log page, full Policy Intelligence engine, then replace the WPF front end once proven; the WPF product remains supported until then
+- [x] Parity slice 9 (2026-09-14): shadowing + broad-scope detection — core `policy_findings` module with exact-superset containment proofs (domain suffix, IP CIDR, port range, protocol) + policy panel integration; 10 tests; live-verified broad-scope finding
+- [ ] Phase 3 final: monitor log page, partial-overlap/containment hints, then replace the WPF front end once proven; the WPF product remains supported until then
 
 ## Candidate next work
 
