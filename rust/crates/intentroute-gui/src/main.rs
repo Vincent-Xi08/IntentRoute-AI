@@ -40,6 +40,7 @@ const MUTED: Color32 = Color32::from_rgb(0x8B, 0x94, 0x9E);
 const ACCENT: Color32 = Color32::from_rgb(0x4C, 0x8D, 0xFF);
 const GREEN: Color32 = Color32::from_rgb(0x3F, 0xB9, 0x50);
 const RED: Color32 = Color32::from_rgb(0xF8, 0x51, 0x49);
+const YELLOW: Color32 = Color32::from_rgb(0xD2, 0x99, 0x22);
 const AMBER: Color32 = Color32::from_rgb(0xD2, 0x99, 0x22);
 
 // ── UI strings (self-contained; see module docs) ────────────────────────────
@@ -193,7 +194,9 @@ struct UiStrings {
     monitor_empty: &'static str,
     monitor_need_config: &'static str,
     monitor_need_exe: &'static str,
-    monitor_edit_blocked: &'static str,
+    monitor_apply: &'static str,
+    monitor_stale: &'static str,
+    monitor_stale_note: &'static str,
     process_exists: &'static str,
 }
 
@@ -336,7 +339,9 @@ const ZH: UiStrings = UiStrings {
     monitor_empty: "暂无日志 —— 启动后 sing-box 的控制台输出会显示在这里",
     monitor_need_config: "请先加载配置再启动 sing-box",
     monitor_need_exe: "请先选择 sing-box 可执行文件（不会自动执行任何未确认的路径）",
-    monitor_edit_blocked: "sing-box 托管运行中：请先在「运行日志」中停止，再编辑配置",
+    monitor_apply: "应用配置并重启",
+    monitor_stale: "配置已过期（进程仍在用旧配置）",
+    monitor_stale_note: "配置已变更；运行中的 sing-box 仍在使用之前的配置。",
     process_exists: "同名进程已有完整身份相同的规则，拒绝添加。",
 };
 
@@ -479,7 +484,9 @@ const EN: UiStrings = UiStrings {
     monitor_empty: "no log lines yet — sing-box console output appears here once started",
     monitor_need_config: "load a configuration before starting sing-box",
     monitor_need_exe: "select the sing-box executable first (no unapproved path is ever executed)",
-    monitor_edit_blocked: "sing-box is under management here: stop it on the runtime log page before editing configuration",
+    monitor_apply: "apply config & restart",
+    monitor_stale: "stale (the process still uses the previous config)",
+    monitor_stale_note: "configuration changed; the running sing-box still uses the previous configuration.",
     process_exists: "a rule with the same full identity for this process already exists; refused.",
 };
 
@@ -872,6 +879,46 @@ impl ConsoleApp {
         }
     }
 
+    /// Applies the current persisted configuration to the running managed
+    /// process (the WPF Apply): load a fresh decrypted snapshot, build the
+    /// runtime config (never displayed), and hand it to the engine's
+    /// replacement pipeline — failures roll back onto the previous config
+    /// and process.
+    fn apply_monitor(&mut self) {
+        let Some(runtime) = &self.monitor else { return };
+        let Some(config_path) = self.config_path.clone() else {
+            self.error = Some(self.s.monitor_need_config.to_string());
+            return;
+        };
+        if !runtime.status().is_running {
+            return;
+        }
+        let snapshot = match Workspace::load(&config_path) {
+            LoadStatus::Loaded(workspace) => workspace.snapshot().clone(),
+            LoadStatus::Missing => {
+                self.error = Some(self.s.status_failed.to_string());
+                return;
+            }
+            LoadStatus::Unusable(_, reason) => {
+                self.error = Some(reason);
+                return;
+            }
+        };
+        match intentroute_core::build_sing_box_config(&snapshot) {
+            Ok(build) => {
+                let outcome = runtime.apply(&build.config_json);
+                if let Some(error) = outcome.error {
+                    self.error = Some(error);
+                } else {
+                    self.error = None;
+                }
+            }
+            Err(error) => {
+                self.error = Some(error);
+            }
+        }
+    }
+
     fn rebuild_view(&mut self) {
         let needle = self.search.trim().to_lowercase();
         let matching: Vec<usize> = (0..self.rules.len())
@@ -932,148 +979,27 @@ impl ConsoleApp {
         }
     }
 
-    /// Performs the confirmed edit: hold the management lock, load the fresh
-    /// on-disk configuration, apply the mutation through the transactional
-    /// workspace engine, and adopt the published snapshot. A held lock (WPF
-    /// running) surfaces the localized block message.
+    /// Performs the confirmed edit: run the load→mutate→commit transaction
+    /// through the workspace engine and adopt the published snapshot.
+    /// When this console manages a sing-box process it already owns the
+    /// exclusive lock (the WPF single-owner model), so the edit runs
+    /// directly and the running process is marked stale; otherwise the lock
+    /// is taken for the duration of one transaction, and a held lock (a
+    /// running WPF instance) surfaces the localized block message.
     fn perform_edit(&mut self, edit: &PendingEdit) {
-        if self.monitor.is_some() {
-            // Our own managed runtime holds the lock; stop it first.
-            self.error = Some(self.s.monitor_edit_blocked.to_string());
-            return;
-        }
         let Some(path) = self.config_path.clone() else {
             self.error = Some(self.s.status_none.to_string());
             return;
         };
         let directory = path.parent().map(PathBuf::from).unwrap_or_default();
         let s = self.s;
+        let owns_lock = self.monitor.is_some();
 
-        let outcome = with_management_lock(&directory, || {
-            let mut workspace = match Workspace::load(&path) {
-                LoadStatus::Loaded(workspace) => *workspace,
-                LoadStatus::Missing => return Err(s.status_failed.to_string()),
-                LoadStatus::Unusable(_, reason) => return Err(reason),
-            };
-            // Add-duplicate check runs against the freshly loaded state so a
-            // same-identity rule (possibly added by another editor after this
-            // view was loaded) is still refused.
-            if let PendingEdit::AddRule { exe_name, mode } = edit {
-                use intentroute_core::rule_identity_key;
-                let draft = ProxyRule {
-                    exe_name: exe_name.clone(),
-                    mode: *mode,
-                    priority: workspace
-                        .snapshot()
-                        .rules
-                        .iter()
-                        .map(|r| r.priority)
-                        .max()
-                        .unwrap_or(0)
-                        + 10,
-                    is_enabled: true,
-                    ..ProxyRule::new(new_rule_id(), exe_name)
-                };
-                let draft_key = rule_identity_key(&draft);
-                if workspace
-                    .snapshot()
-                    .rules
-                    .iter()
-                    .any(|r| rule_identity_key(r).eq_ignore_ascii_case(&draft_key))
-                {
-                    return Err(s.add_duplicate.to_string());
-                }
-            }
-
-            let rule_id_for_add = matches!(edit, PendingEdit::AddRule { .. })
-                .then(new_rule_id)
-                .unwrap_or_default();
-            let priority_for_add = workspace
-                .snapshot()
-                .rules
-                .iter()
-                .map(|r| r.priority)
-                .max()
-                .unwrap_or(0)
-                + 10;
-            workspace.commit(|candidate| match edit {
-                PendingEdit::ToggleEnabled { rule_id } => {
-                    if let Some(rule) = candidate.rules.iter_mut().find(|r| &r.id == rule_id) {
-                        rule.is_enabled = !rule.is_enabled;
-                    }
-                }
-                PendingEdit::SetMode { rule_id, mode } => {
-                    if let Some(rule) = candidate.rules.iter_mut().find(|r| &r.id == rule_id) {
-                        rule.mode = *mode;
-                    }
-                }
-                PendingEdit::UpdateConstraints {
-                    rule_id,
-                    hosts,
-                    ips,
-                    ports,
-                    protocol,
-                } => {
-                    if let Some(rule) = candidate.rules.iter_mut().find(|r| &r.id == rule_id) {
-                        rule.target_hosts = hosts.clone();
-                        rule.target_ips = ips.clone();
-                        rule.target_ports = ports.clone();
-                        rule.protocol = protocol.clone();
-                    }
-                }
-                PendingEdit::DeleteRule { rule_id } => {
-                    candidate.rules.retain(|r| &r.id != rule_id);
-                }
-                PendingEdit::AddRule { exe_name, mode } => {
-                    candidate.rules.push(ProxyRule {
-                        exe_name: exe_name.clone(),
-                        mode: *mode,
-                        priority: priority_for_add,
-                        is_enabled: true,
-                        ..ProxyRule::new(rule_id_for_add, exe_name)
-                    });
-                }
-                PendingEdit::UpdateServer { server_id, server } => {
-                    let port: i32 = server.port.trim().parse().unwrap_or(-1);
-                    if let Some(target) = candidate
-                        .proxy_servers
-                        .iter_mut()
-                        .find(|srv| &srv.id == server_id)
-                    {
-                        target.proxy_type = match server.proxy_type {
-                            1 => ProxyType::Http,
-                            2 => ProxyType::Https,
-                            _ => ProxyType::Socks5,
-                        };
-                        target.host = server.host.trim().to_string();
-                        target.port = port;
-                        target.username = server.username.clone();
-                        target.password = server.password.clone();
-                        target.enabled = server.enabled;
-                    }
-                }
-                PendingEdit::MoveRule { rule_id, delta } => {
-                    // WPF MoveRule parity: swap in canonical order (all rules,
-                    // not just enabled), rewrite persisted order, reassign
-                    // priorities as (i+1)*10. Out-of-range moves are no-ops.
-                    let ordered = canonical_order(candidate.rules.clone());
-                    if let Some(index) = ordered.iter().position(|r| &r.id == rule_id) {
-                        let new_index = index as i32 + delta;
-                        if new_index >= 0 && (new_index as usize) < ordered.len() {
-                            let mut reordered = ordered;
-                            reordered.swap(index, new_index as usize);
-                            candidate.rules = reordered;
-                            for (i, rule) in candidate.rules.iter_mut().enumerate() {
-                                rule.priority = (i as i32 + 1) * 10;
-                            }
-                        }
-                    }
-                }
-                PendingEdit::SetGlobalMode { mode } => {
-                    candidate.global_mode = *mode;
-                }
-            })
-        });
+        let outcome = if owns_lock {
+            run_edit_transaction(&path, edit, s)
+        } else {
+            with_management_lock(&directory, || run_edit_transaction(&path, edit, s))
+        };
 
         match outcome {
             Ok(published) => {
@@ -1084,6 +1010,15 @@ impl ConsoleApp {
                 self.rules = published.rules.clone();
                 self.config = Some(published);
                 self.rebuild_view();
+                // The WPF parity move: an edit under our own management
+                // leaves the running process serving the previous config.
+                if owns_lock {
+                    if let Some(runtime) = &self.monitor {
+                        if runtime.status().is_running {
+                            runtime.mark_running_stale(s.monitor_stale_note);
+                        }
+                    }
+                }
             }
             Err(reason) => {
                 let blocked = reason.contains("already managing");
@@ -1096,6 +1031,138 @@ impl ConsoleApp {
             }
         }
     }
+}
+
+/// One full load→mutate→commit transaction against `path`. The caller
+/// owns the serialization strategy (management lock held or already owned).
+fn run_edit_transaction(
+    path: &std::path::Path,
+    edit: &PendingEdit,
+    s: &UiStrings,
+) -> Result<AppConfig, String> {
+    let mut workspace = match Workspace::load(path) {
+        LoadStatus::Loaded(workspace) => *workspace,
+        LoadStatus::Missing => return Err(s.status_failed.to_string()),
+        LoadStatus::Unusable(_, reason) => return Err(reason),
+    };
+    // Add-duplicate check runs against the freshly loaded state so a
+    // same-identity rule (possibly added by another editor after this
+    // view was loaded) is still refused.
+    if let PendingEdit::AddRule { exe_name, mode } = edit {
+        use intentroute_core::rule_identity_key;
+        let draft = ProxyRule {
+            exe_name: exe_name.clone(),
+            mode: *mode,
+            priority: workspace
+                .snapshot()
+                .rules
+                .iter()
+                .map(|r| r.priority)
+                .max()
+                .unwrap_or(0)
+                + 10,
+            is_enabled: true,
+            ..ProxyRule::new(new_rule_id(), exe_name)
+        };
+        let draft_key = rule_identity_key(&draft);
+        if workspace
+            .snapshot()
+            .rules
+            .iter()
+            .any(|r| rule_identity_key(r).eq_ignore_ascii_case(&draft_key))
+        {
+            return Err(s.add_duplicate.to_string());
+        }
+    }
+
+    let rule_id_for_add = matches!(edit, PendingEdit::AddRule { .. })
+        .then(new_rule_id)
+        .unwrap_or_default();
+    let priority_for_add = workspace
+        .snapshot()
+        .rules
+        .iter()
+        .map(|r| r.priority)
+        .max()
+        .unwrap_or(0)
+        + 10;
+    workspace.commit(|candidate| match edit {
+        PendingEdit::ToggleEnabled { rule_id } => {
+            if let Some(rule) = candidate.rules.iter_mut().find(|r| &r.id == rule_id) {
+                rule.is_enabled = !rule.is_enabled;
+            }
+        }
+        PendingEdit::SetMode { rule_id, mode } => {
+            if let Some(rule) = candidate.rules.iter_mut().find(|r| &r.id == rule_id) {
+                rule.mode = *mode;
+            }
+        }
+        PendingEdit::UpdateConstraints {
+            rule_id,
+            hosts,
+            ips,
+            ports,
+            protocol,
+        } => {
+            if let Some(rule) = candidate.rules.iter_mut().find(|r| &r.id == rule_id) {
+                rule.target_hosts = hosts.clone();
+                rule.target_ips = ips.clone();
+                rule.target_ports = ports.clone();
+                rule.protocol = protocol.clone();
+            }
+        }
+        PendingEdit::DeleteRule { rule_id } => {
+            candidate.rules.retain(|r| &r.id != rule_id);
+        }
+        PendingEdit::AddRule { exe_name, mode } => {
+            candidate.rules.push(ProxyRule {
+                exe_name: exe_name.clone(),
+                mode: *mode,
+                priority: priority_for_add,
+                is_enabled: true,
+                ..ProxyRule::new(rule_id_for_add, exe_name)
+            });
+        }
+        PendingEdit::UpdateServer { server_id, server } => {
+            let port: i32 = server.port.trim().parse().unwrap_or(-1);
+            if let Some(target) = candidate
+                .proxy_servers
+                .iter_mut()
+                .find(|srv| &srv.id == server_id)
+            {
+                target.proxy_type = match server.proxy_type {
+                    1 => ProxyType::Http,
+                    2 => ProxyType::Https,
+                    _ => ProxyType::Socks5,
+                };
+                target.host = server.host.trim().to_string();
+                target.port = port;
+                target.username = server.username.clone();
+                target.password = server.password.clone();
+                target.enabled = server.enabled;
+            }
+        }
+        PendingEdit::MoveRule { rule_id, delta } => {
+            // WPF MoveRule parity: swap in canonical order (all rules,
+            // not just enabled), rewrite persisted order, reassign
+            // priorities as (i+1)*10. Out-of-range moves are no-ops.
+            let ordered = canonical_order(candidate.rules.clone());
+            if let Some(index) = ordered.iter().position(|r| &r.id == rule_id) {
+                let new_index = index as i32 + delta;
+                if new_index >= 0 && (new_index as usize) < ordered.len() {
+                    let mut reordered = ordered;
+                    reordered.swap(index, new_index as usize);
+                    candidate.rules = reordered;
+                    for (i, rule) in candidate.rules.iter_mut().enumerate() {
+                        rule.priority = (i as i32 + 1) * 10;
+                    }
+                }
+            }
+        }
+        PendingEdit::SetGlobalMode { mode } => {
+            candidate.global_mode = *mode;
+        }
+    })
 }
 
 /// Fixed protocol list for the constraints combo; "" = unrestricted, matching
@@ -1582,6 +1649,7 @@ impl eframe::App for ConsoleApp {
         if self.monitor_open {
             let mut start_requested = false;
             let mut stop_requested = false;
+            let mut apply_requested = false;
             let mut probe_requested = false;
             let mut browse_requested = false;
             let mut clear_requested = false;
@@ -1625,6 +1693,9 @@ impl eframe::App for ConsoleApp {
                             if ui.button(RichText::new(s.monitor_stop).strong()).clicked() {
                                 stop_requested = true;
                             }
+                            if ui.button(s.monitor_apply).clicked() {
+                                apply_requested = true;
+                            }
                         } else if ui.button(s.monitor_start).clicked() {
                             start_requested = true;
                         }
@@ -1634,6 +1705,9 @@ impl eframe::App for ConsoleApp {
                             let state_label = match status.state {
                                 intentroute_core::singbox::RuntimeState::Running => {
                                     RichText::new(s.monitor_running).color(GREEN)
+                                }
+                                intentroute_core::singbox::RuntimeState::RunningStale => {
+                                    RichText::new(s.monitor_stale).color(YELLOW)
                                 }
                                 intentroute_core::singbox::RuntimeState::Stopped => {
                                     RichText::new(s.monitor_stopped).color(MUTED)
@@ -1762,6 +1836,9 @@ impl eframe::App for ConsoleApp {
             }
             if start_requested {
                 self.start_monitor();
+            }
+            if apply_requested {
+                self.apply_monitor();
             }
             if stop_requested {
                 if let Some(runtime) = self.monitor.take() {

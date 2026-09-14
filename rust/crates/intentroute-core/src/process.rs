@@ -93,8 +93,10 @@ pub fn snapshot_processes() -> Vec<ProcessInfo> {
     result
 }
 
+/// Full executable path for one PID (empty when access is denied or the
+/// process is gone); shared with the sing-box orphan recovery.
 #[cfg(windows)]
-fn query_process_path(pid: u32) -> String {
+pub fn query_process_path(pid: u32) -> String {
     use ffi::*;
     let process = unsafe {
         OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, 0, pid)
@@ -112,6 +114,13 @@ fn query_process_path(pid: u32) -> String {
         return String::new();
     }
     String::from_utf16_lossy(&buffer[..size as usize])
+}
+
+/// Full executable path for one PID (unimplemented off Windows).
+#[cfg(not(windows))]
+pub fn query_process_path(pid: u32) -> String {
+    let _ = pid;
+    String::new()
 }
 
 #[cfg(not(windows))]

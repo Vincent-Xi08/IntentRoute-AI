@@ -37,6 +37,7 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 pub const GENERATED_CONFIG_FILE_NAME: &str = "sing-box.generated.json";
+pub const RUNTIME_STATE_FILE_NAME: &str = "sing-box.runtime-state.json";
 pub const ENV_EXECUTABLE: &str = "INTENTROUTE_SING_BOX";
 pub const LEGACY_ENV_EXECUTABLE: &str = "PROXYMANAGER_SING_BOX";
 pub const DEFAULT_EXECUTABLE_NAMES: [&str; 2] = ["sing-box.exe", "sing-box"];
@@ -385,6 +386,10 @@ pub fn check_config(exe: &Path, config_path: &Path) -> Result<(), String> {
 pub enum RuntimeState {
     Stopped,
     Running,
+    /// A managed process is up, but it serves a configuration older than
+    /// the persisted one (an edit landed, or a replacement failed and the
+    /// previous config was restored).
+    RunningStale,
     Failed,
 }
 
@@ -401,6 +406,7 @@ pub struct RuntimeStatus {
 
 struct Inner {
     logs: LogSink,
+    max_logs: usize,
     child: Option<Child>,
     reader_threads: Vec<std::thread::JoinHandle<()>>,
     stopping: bool,
@@ -450,29 +456,16 @@ impl ManagedRuntime {
         version: Option<&str>,
         max_log_lines: usize,
     ) -> Result<ManagedRuntime, String> {
+        // Recovery runs under the freshly acquired lock, before cleanup
+        // removes the state file: an orphaned child from a crashed manager
+        // is proven by PID + start time and terminated here.
+        recover_orphaned_process(config_directory);
         cleanup_stale_runtime_artifacts(config_directory);
         std::fs::create_dir_all(config_directory)
             .map_err(|error| format!("failed to prepare config directory: {error}"))?;
 
         let config_path = config_directory.join(GENERATED_CONFIG_FILE_NAME);
-        let candidate_path = config_directory.join(format!(
-            "{}.{}.candidate",
-            GENERATED_CONFIG_FILE_NAME,
-            unique_suffix()
-        ));
-        // The full config carries proxy passwords; it goes straight to disk
-        // and is never surfaced through an error path.
-        std::fs::write(&candidate_path, config_json.as_bytes())
-            .map_err(|error| format!("failed to write candidate config: {error}"))?;
-
-        if let Err(error) = check_config(executable, &candidate_path) {
-            let _ = std::fs::remove_file(&candidate_path);
-            return Err(error);
-        }
-
-        crate::workspace::save_atomic(&config_path, config_json.as_bytes())
-            .map_err(|error| format!("failed to promote config: {error}"))?;
-        let _ = std::fs::remove_file(&candidate_path);
+        write_check_and_promote(&config_path, executable, config_json)?;
 
         let max_logs = max_log_lines.max(32);
         let spawn_result = spawn_managed_raw(
@@ -487,6 +480,9 @@ impl ManagedRuntime {
                 return Err(format!("failed to start sing-box: {error}"));
             }
         };
+        // Record identity for orphan recovery before the settle window, so
+        // a crash during startup is still recoverable.
+        write_runtime_state(config_directory, child.id(), executable);
 
         std::thread::sleep(STARTUP_SETTLE);
         match child.try_wait() {
@@ -496,6 +492,7 @@ impl ManagedRuntime {
                     let _ = thread.join();
                 }
                 let _ = std::fs::remove_file(&config_path);
+                delete_runtime_state(config_directory);
                 return Err(format!(
                     "sing-box exited during startup with code {}.",
                     status.code().unwrap_or(-1)
@@ -508,6 +505,7 @@ impl ManagedRuntime {
                     let _ = thread.join();
                 }
                 let _ = std::fs::remove_file(&config_path);
+                delete_runtime_state(config_directory);
                 return Err(format!("sing-box startup wait failed: {error}"));
             }
         }
@@ -515,6 +513,7 @@ impl ManagedRuntime {
         Ok(ManagedRuntime {
             inner: Mutex::new(Inner {
                 logs,
+                max_logs,
                 child: Some(child),
                 reader_threads,
                 stopping: false,
@@ -583,6 +582,10 @@ impl ManagedRuntime {
                         let _ = thread.join();
                     }
                     let _ = std::fs::remove_file(&inner.config_path);
+                    let directory = inner.config_path.parent().map(Path::to_path_buf);
+                    if let Some(directory) = directory {
+                        delete_runtime_state(&directory);
+                    }
                 }
                 Ok(None) => {}
                 Err(_) => {
@@ -592,6 +595,250 @@ impl ManagedRuntime {
                 }
             }
         }
+    }
+
+    /// Marks a still-running managed process as serving an outdated
+    /// configuration (the WPF `MarkRunningConfigurationStale`): the error is
+    /// redacted and stored, the state becomes [`RuntimeState::RunningStale`].
+    pub fn mark_running_stale(&self, error: &str) {
+        if let Ok(mut inner) = self.inner.lock() {
+            let running = !inner.stopping && inner.child.is_some();
+            if !running {
+                return;
+            }
+            inner.state = RuntimeState::RunningStale;
+            inner.last_error = Some(redact_secrets(error));
+        }
+    }
+
+    /// Replaces the running process with one started from `config_json`
+    /// (the WPF `ApplyAsync`, pinned to the executable chosen at start):
+    /// candidate → `check` → promote → kill old + start new → settle. Any
+    /// failure before the swap leaves the old process and old config
+    /// untouched (state RunningStale); a failure of the replacement itself
+    /// restores the previous config bytes and restarts the previous
+    /// executable, or — if that rollback fails too — deletes the config and
+    /// converges to Failed.
+    pub fn apply(&self, config_json: &str) -> ApplyOutcome {
+        let (previous_bytes, previous_executable) = {
+            let Ok(inner) = self.inner.lock() else {
+                return ApplyOutcome::failed("the managed runtime is torn down");
+            };
+            if inner.stopping || inner.child.is_none() {
+                return ApplyOutcome::failed(
+                    "apply requires a running managed process; start it first",
+                );
+            }
+            let previous_bytes = match std::fs::read(&inner.config_path) {
+                Ok(bytes) => bytes,
+                Err(_) => {
+                    return ApplyOutcome::failed(
+                        "The managed sing-box process is running, but its previous generated config is unavailable; stop it before applying a replacement.",
+                    );
+                }
+            };
+            (previous_bytes, inner.executable_path.clone())
+        };
+
+        let config_path = self.config_path_of();
+        if let Err(error) = write_check_and_promote(&config_path, &previous_executable, config_json) {
+            // The old process keeps serving the old config: stale, not failed.
+            self.note_failure_keep_running(&error);
+            return self.apply_outcome();
+        }
+
+        match self.replace_process(&previous_executable, &config_path) {
+            Ok(()) => {
+                if let Ok(mut inner) = self.inner.lock() {
+                    inner.state = RuntimeState::Running;
+                    inner.last_error = None;
+                }
+                self.apply_outcome()
+            }
+            Err(startup_error) => {
+                let rollback = self.rollback_to_previous(&previous_executable, &previous_bytes);
+                match rollback {
+                    Ok(()) => {
+                        if let Ok(mut inner) = self.inner.lock() {
+                            inner.state = RuntimeState::RunningStale;
+                            inner.last_error = Some(format!(
+                                "{startup_error} Previous configuration was restored and restarted."
+                            ));
+                        }
+                    }
+                    Err(rollback_error) => {
+                        if let Ok(mut inner) = self.inner.lock() {
+                            inner.stopping = true;
+                            let child = inner.child.take();
+                            inner._job = KillOnCloseJob::none();
+                            if let Some(mut child) = child {
+                                wait_briefly(&mut child);
+                            }
+                            let _ = std::fs::remove_file(&inner.config_path);
+                            let directory = inner.config_path.parent().map(Path::to_path_buf);
+                            if let Some(directory) = directory {
+                                delete_runtime_state(&directory);
+                            }
+                            inner.state = RuntimeState::Failed;
+                            inner.last_error = Some(format!(
+                                "{startup_error} Rollback also failed: {}",
+                                redact_secrets(&rollback_error.unwrap_or_default())
+                            ));
+                        }
+                    }
+                }
+                self.apply_outcome()
+            }
+        }
+    }
+
+    fn config_path_of(&self) -> PathBuf {
+        match self.inner.lock() {
+            Ok(inner) => inner.config_path.clone(),
+            Err(poisoned) => poisoned.into_inner().config_path.clone(),
+        }
+    }
+
+    fn apply_outcome(&self) -> ApplyOutcome {
+        let status = self.status();
+        ApplyOutcome {
+            error: status.last_error.clone(),
+            status,
+        }
+    }
+
+    /// Records a failure while a process keeps running: RunningStale with a
+    /// redacted error (the WPF `FailApply(preserveRunningProcess: true)`).
+    fn note_failure_keep_running(&self, error: &str) {
+        if let Ok(mut inner) = self.inner.lock() {
+            if !inner.stopping && inner.child.is_some() {
+                inner.state = RuntimeState::RunningStale;
+                inner.last_error = Some(redact_secrets(error));
+            }
+        }
+    }
+
+    /// Kills the current child and starts a fresh one on `config_path`
+    /// (which must already hold the config to run), writing the runtime
+    /// state file and settling (the WPF `ReplaceProcessAsync`). `Err` means
+    /// the replacement exited during startup — the caller rolls back.
+    fn replace_process(&self, executable: &Path, config_path: &Path) -> Result<(), String> {
+        let spawn = {
+            let mut inner = self
+                .inner
+                .lock()
+                .map_err(|_| "runtime state unavailable".to_string())?;
+            inner.stopping = true;
+            let old_child = inner.child.take();
+            inner._job = KillOnCloseJob::none();
+            if let Some(mut child) = old_child {
+                wait_briefly(&mut child);
+            }
+            for thread in std::mem::take(&mut inner.reader_threads) {
+                let _ = thread.join();
+            }
+            // The state file describes the outgoing child; the incoming one
+            // rewrites it right after spawn. The config file stays — the
+            // replacement runs on it.
+            if let Some(directory) = inner.config_path.parent() {
+                delete_runtime_state(directory);
+            }
+            spawn_managed_raw(
+                executable,
+                &["run", "-c", &config_path.to_string_lossy()],
+                inner.max_logs,
+            )
+        };
+        let (mut child, reader_threads, logs, job) = match spawn {
+            Ok(spawned) => spawned,
+            Err(error) => {
+                return Err(format!("failed to start sing-box: {error}"));
+            }
+        };
+        write_runtime_state(
+            config_path.parent().unwrap_or(Path::new(".")),
+            child.id(),
+            executable,
+        );
+
+        std::thread::sleep(STARTUP_SETTLE);
+        match child.try_wait() {
+            Ok(None) => {
+                if let Ok(mut inner) = self.inner.lock() {
+                    inner.stopping = false;
+                    inner.child = Some(child);
+                    inner.reader_threads = reader_threads;
+                    inner.logs = logs;
+                    inner._job = job;
+                }
+                Ok(())
+            }
+            Ok(Some(status)) => {
+                drop(job);
+                for thread in reader_threads {
+                    let _ = thread.join();
+                }
+                Err(format!(
+                    "Failed to start replacement sing-box: exited during startup with code {}.",
+                    status.code().unwrap_or(-1)
+                ))
+            }
+            Err(error) => {
+                drop(job);
+                for thread in reader_threads {
+                    let _ = thread.join();
+                }
+                Err(format!("Failed to start replacement sing-box: {error}"))
+            }
+        }
+    }
+
+    /// Restores the previous config bytes and restarts the previous
+    /// executable on them (the WPF `TryRollbackAsync`).
+    fn rollback_to_previous(
+        &self,
+        previous_executable: &Path,
+        previous_bytes: &[u8],
+    ) -> Result<(), Option<String>> {
+        let config_path = self.config_path_of();
+        crate::workspace::save_atomic(&config_path, previous_bytes)
+            .map_err(|error| Some(error))?;
+        match self.replace_process(previous_executable, &config_path) {
+            Ok(()) => Ok(()),
+            Err(error) => {
+                let _ = std::fs::remove_file(&config_path);
+                Err(Some(error))
+            }
+        }
+    }
+}
+
+/// Outcome of [`ManagedRuntime::apply`]: the post-apply status plus the
+/// (already redacted) error when the replacement did not succeed cleanly.
+#[derive(Debug, Clone)]
+pub struct ApplyOutcome {
+    pub status: RuntimeStatus,
+    pub error: Option<String>,
+}
+
+impl ApplyOutcome {
+    fn failed(error: &str) -> Self {
+        Self {
+            status: RuntimeStatus {
+                state: RuntimeState::Failed,
+                is_running: false,
+                process_id: None,
+                version: None,
+                executable_path: None,
+                config_path: None,
+                last_error: Some(error.to_string()),
+            },
+            error: Some(error.to_string()),
+        }
+    }
+
+    pub fn is_ok(&self) -> bool {
+        self.error.is_none()
     }
 }
 
@@ -609,6 +856,9 @@ fn stop_inner(inner: &mut Inner) {
         wait_briefly(&mut child);
     }
     let _ = std::fs::remove_file(&inner.config_path);
+    if let Some(directory) = inner.config_path.parent() {
+        delete_runtime_state(directory);
+    }
     for thread in std::mem::take(&mut inner.reader_threads) {
         let _ = thread.join();
     }
@@ -640,9 +890,11 @@ fn snapshot_logs(inner: &Inner) -> Vec<LogLine> {
 }
 
 fn status_of(inner: &Inner) -> RuntimeStatus {
+    // converge_on_exit keeps inner.state consistent with the child, so the
+    // recorded state (incl. RunningStale) is authoritative here.
     let running = !inner.stopping && inner.child.is_some();
     RuntimeStatus {
-        state: if running { RuntimeState::Running } else { inner.state },
+        state: inner.state,
         is_running: running,
         process_id: running.then(|| inner.child.as_ref().map_or(0, Child::id)),
         version: inner.version.clone(),
@@ -788,6 +1040,188 @@ fn unique_suffix() -> String {
         .duration_since(std::time::UNIX_EPOCH)
         .map_or(0, |duration| duration.as_nanos());
     format!("{:x}-{}", nanos, std::process::id())
+}
+
+/// Writes the candidate config (which carries proxy passwords — straight
+/// to disk, never through an error path), validates it with
+/// `<exe> check -c`, then promotes it atomically over `config_path`.
+/// A failed check leaves the previous config untouched.
+fn write_check_and_promote(
+    config_path: &Path,
+    executable: &Path,
+    config_json: &str,
+) -> Result<(), String> {
+    let candidate_path = config_path.with_file_name(format!(
+        "{}.{}.candidate",
+        config_path.file_name().map_or_else(|| GENERATED_CONFIG_FILE_NAME.into(), |name| name.to_string_lossy().into_owned()),
+        unique_suffix()
+    ));
+    std::fs::write(&candidate_path, config_json.as_bytes())
+        .map_err(|error| format!("failed to write candidate config: {error}"))?;
+
+    if let Err(error) = check_config(executable, &candidate_path) {
+        let _ = std::fs::remove_file(&candidate_path);
+        return Err(error);
+    }
+
+    crate::workspace::save_atomic(config_path, config_json.as_bytes())
+        .map_err(|error| format!("failed to promote config: {error}"))?;
+    let _ = std::fs::remove_file(&candidate_path);
+    Ok(())
+}
+
+// ---- runtime state file + orphaned-process recovery (WPF parity) ----
+// The state file records the managed child's PID, .NET-epoch start ticks,
+// and executable path so the next manager can prove identity (PID alone is
+// reusable) and terminate a process orphaned by a crash.
+
+fn write_runtime_state(config_directory: &Path, pid: u32, executable_path: &Path) {
+    let Some(ticks) = process_start_ticks(pid) else { return };
+    let state = serde_json::json!({
+        "process_id": pid,
+        "start_time_utc_ticks": ticks,
+        "executable_path": executable_path.to_string_lossy(),
+    });
+    let path = config_directory.join(RUNTIME_STATE_FILE_NAME);
+    let _ = crate::workspace::save_atomic(&path, state.to_string().as_bytes());
+}
+
+fn delete_runtime_state(config_directory: &Path) {
+    let _ = std::fs::remove_file(config_directory.join(RUNTIME_STATE_FILE_NAME));
+}
+
+/// Port of `RecoverOrphanedProcess`: verify the recorded PID by start time
+/// (±1 s, .NET ticks) and — when both paths are known — by executable
+/// identity, terminate it, and remove the state file. Recovery is best
+/// effort; a sing-box child spawns no processes of its own, so a direct
+/// `TerminateProcess` matches the WPF tree kill for this workload.
+fn recover_orphaned_process(config_directory: &Path) {
+    let path = config_directory.join(RUNTIME_STATE_FILE_NAME);
+    let Ok(raw) = std::fs::read(&path) else { return };
+    let Ok(document) = serde_json::from_slice::<serde_json::Value>(&raw) else {
+        delete_runtime_state(config_directory);
+        return;
+    };
+    let pid = document.get("process_id").and_then(|v| v.as_u64()).unwrap_or(0);
+    let expected_ticks = document
+        .get("start_time_utc_ticks")
+        .and_then(|v| v.as_i64())
+        .unwrap_or(0);
+    let expected_executable = document
+        .get("executable_path")
+        .and_then(|v| v.as_str())
+        .map(str::to_string);
+
+    if pid > 0 && expected_ticks > 0 {
+        if let Some(actual_ticks) = process_start_ticks(pid as u32) {
+            let within_tolerance = (actual_ticks - expected_ticks).abs() <= 10_000_000; // 1 s in 100-ns ticks
+            let executable_matches = match &expected_executable {
+                Some(expected) if !expected.trim().is_empty() => {
+                    let actual = crate::process::query_process_path(pid as u32);
+                    // Path unknown on either side falls back to PID+time proof.
+                    actual.is_empty()
+                        || std::path::absolute(&actual)
+                            .map(|a| a.to_string_lossy().to_lowercase())
+                            .unwrap_or_else(|_| actual.to_lowercase())
+                            == std::path::absolute(expected)
+                                .map(|e| e.to_string_lossy().to_lowercase())
+                                .unwrap_or_else(|_| expected.to_lowercase())
+                }
+                _ => true,
+            };
+            if within_tolerance && executable_matches {
+                terminate_process(pid as u32);
+            }
+        }
+    }
+    delete_runtime_state(config_directory);
+}
+
+/// Process start time in .NET `DateTime.Ticks` (100 ns since 0001-01-01),
+/// read via `GetProcessTimes`; `None` when the process is gone.
+#[cfg(windows)]
+fn process_start_ticks(pid: u32) -> Option<i64> {
+    #[repr(C)]
+    struct FileTime {
+        low: u32,
+        high: i32,
+    }
+    extern "system" {
+        fn OpenProcess(access: u32, inherit: i32, pid: u32) -> *mut core::ffi::c_void;
+        fn GetProcessTimes(
+            process: *mut core::ffi::c_void,
+            creation: *mut FileTime,
+            exit: *mut FileTime,
+            kernel: *mut FileTime,
+            user: *mut FileTime,
+        ) -> i32;
+        fn CloseHandle(object: *mut core::ffi::c_void) -> i32;
+    }
+    const PROCESS_QUERY_LIMITED_INFORMATION: u32 = 0x1000;
+    // FILETIME epoch (1601-01-01) expressed in .NET ticks (0001-01-01).
+    const FILETIME_TO_DOTNET_TICKS: i64 = 504_911_232_000_000_000;
+
+    unsafe {
+        let process = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, 0, pid);
+        if process.is_null() {
+            return None;
+        }
+        let mut creation = FileTime { low: 0, high: 0 };
+        let mut exit = FileTime { low: 0, high: 0 };
+        let mut kernel = FileTime { low: 0, high: 0 };
+        let mut user = FileTime { low: 0, high: 0 };
+        let ok = GetProcessTimes(process, &mut creation, &mut exit, &mut kernel, &mut user);
+        CloseHandle(process);
+        if ok == 0 {
+            return None;
+        }
+        Some(
+            ((creation.high as i64) << 32 | creation.low as u64 as i64)
+                + FILETIME_TO_DOTNET_TICKS,
+        )
+    }
+}
+
+#[cfg(not(windows))]
+fn process_start_ticks(pid: u32) -> Option<i64> {
+    let _ = pid;
+    None
+}
+
+/// Terminates one process by PID (`OpenProcess` + `TerminateProcess`) and
+/// waits briefly for it to disappear.
+#[cfg(windows)]
+fn terminate_process(pid: u32) {
+    extern "system" {
+        fn OpenProcess(access: u32, inherit: i32, pid: u32) -> *mut core::ffi::c_void;
+        fn TerminateProcess(process: *mut core::ffi::c_void, exit_code: u32) -> i32;
+        fn WaitForSingleObject(handle: *mut core::ffi::c_void, milliseconds: u32) -> u32;
+        fn CloseHandle(object: *mut core::ffi::c_void) -> i32;
+    }
+    const PROCESS_TERMINATE: u32 = 0x0001;
+    const WAIT_TIMEOUT: u32 = 0x0000_0102;
+
+    unsafe {
+        let process = OpenProcess(PROCESS_TERMINATE, 0, pid);
+        if process.is_null() {
+            return;
+        }
+        TerminateProcess(process, 1);
+        // Wait up to 3 s like the WPF recovery, yielding in slices.
+        let mut waited = 0u32;
+        while waited < 3000 {
+            if WaitForSingleObject(process, 100) != WAIT_TIMEOUT {
+                break;
+            }
+            waited += 100;
+        }
+        CloseHandle(process);
+    }
+}
+
+#[cfg(not(windows))]
+fn terminate_process(pid: u32) {
+    let _ = pid;
 }
 
 fn cleanup_stale_runtime_artifacts(config_directory: &Path) {
@@ -1186,7 +1620,12 @@ mod tests {
 
         let runtime = ManagedRuntime::start(&directory, &fake, "{}", None, 64).unwrap();
         assert!(directory.join(GENERATED_CONFIG_FILE_NAME).is_file(), "fresh config written");
-        assert!(!directory.join("sing-box.runtime-state.json").is_file());
+        // The stale state file was consumed by recovery and replaced by the
+        // live one for the new child (parse it rather than substring-match —
+        // the directory label appears inside executable_path).
+        let state = fs::read_to_string(directory.join(RUNTIME_STATE_FILE_NAME)).unwrap();
+        let parsed: serde_json::Value = serde_json::from_str(&state).expect("live state file json");
+        assert!(parsed["process_id"].as_u64().unwrap_or(0) > 0, "state file: {state}");
         runtime.stop();
         fs::remove_dir_all(&directory).ok();
     }
@@ -1312,6 +1751,248 @@ mod tests {
             candidates.iter().any(|candidate| candidate == &expected),
             "env candidate must be discovered: {candidates:?} vs {expected:?}"
         );
+        fs::remove_dir_all(&directory).ok();
+    }
+
+    // ---- runtime state file + orphan recovery + apply (parity slice 12) ----
+
+    fn comspec() -> PathBuf {
+        std::env::var_os("COMSPEC").map_or_else(|| PathBuf::from(r"C:\Windows\System32\cmd.exe"), PathBuf::from)
+    }
+
+    /// A config-sensitive fake: `check` fails when the config contains
+    /// "bad-check"; `run` exits when the config contains "crash-config".
+    /// `find` is pinned to the System32 binary so a POSIX find on PATH
+    /// cannot shadow it.
+    fn branching_fake_sing_box(directory: &Path) -> PathBuf {
+        let path = directory.join("fake-sing-box.cmd");
+        // Flat lines + goto: parenthesized blocks with pipes interact badly
+        // with command resolution, and `find` is pinned to the System32
+        // binary so a POSIX find on PATH cannot shadow it. `find "s" file`
+        // avoids piping altogether.
+        fs::write(
+            &path,
+            "@echo off\r\nif \"%1\"==\"version\" echo sing-box version v1.13.0 & exit /b 0\r\nif not \"%1\"==\"check\" goto run\r\n%SYSTEMROOT%\\System32\\find.exe \"bad-check\" \"%3\" >nul 2>&1\r\nif %errorlevel%==0 exit /b 1\r\nexit /b 0\r\n:run\r\nif not \"%1\"==\"run\" exit /b 0\r\n%SYSTEMROOT%\\System32\\find.exe \"crash-config\" \"%3\" >nul 2>&1\r\nif %errorlevel%==0 exit /b 2\r\necho INFO[0000] sing-box started\r\nping -n 60 127.0.0.1 > nul\r\nexit /b 0\r\n",
+        )
+        .unwrap();
+        path
+    }
+
+    #[test]
+    fn state_file_written_while_running_and_removed_on_stop() {
+        let directory = temp_directory("statefile");
+        let fake = fake_sing_box(&directory, "1.13.0");
+        let runtime = ManagedRuntime::start(&directory, &fake, "{}", None, 64).unwrap();
+        assert!(directory.join(RUNTIME_STATE_FILE_NAME).is_file());
+        runtime.stop();
+        assert!(!directory.join(RUNTIME_STATE_FILE_NAME).is_file());
+        drop(runtime);
+        fs::remove_dir_all(&directory).ok();
+    }
+
+    #[test]
+    fn orphan_recovery_kills_recorded_process() {
+        let directory = temp_directory("orphan");
+        let fake = fake_sing_box(&directory, "1.13.0");
+        // A leftover child from a "crashed" manager, recorded with its real
+        // image (the shell host) so the path proof matches.
+        let (mut child, reader_threads, _logs, job) =
+            spawn_managed_raw(&fake, &["run", "-c", "none"], 32).unwrap();
+        write_runtime_state(&directory, child.id(), &comspec());
+        assert!(directory.join(RUNTIME_STATE_FILE_NAME).is_file());
+
+        let runtime = ManagedRuntime::start(&directory, &fake, "{}", None, 64).unwrap();
+        // The recorded orphan was terminated during recovery.
+        let mut exited = false;
+        for _ in 0..100 {
+            if matches!(child.try_wait(), Ok(Some(_))) {
+                exited = true;
+                break;
+            }
+            std::thread::sleep(Duration::from_millis(50));
+        }
+        assert!(exited, "orphan recorded by PID + start time must be killed");
+        drop(job);
+        for thread in reader_threads {
+            let _ = thread.join();
+        }
+        runtime.stop();
+        drop(runtime);
+        fs::remove_dir_all(&directory).ok();
+    }
+
+    #[test]
+    fn orphan_recovery_ignores_wrong_start_time() {
+        let directory = temp_directory("orphan-time");
+        let fake = fake_sing_box(&directory, "1.13.0");
+        let (mut child, reader_threads, _logs, job) =
+            spawn_managed_raw(&fake, &["run", "-c", "none"], 32).unwrap();
+        // Correct PID but ticks far outside the ±1 s tolerance: a reused PID
+        // must not be killed.
+        let state = serde_json::json!({
+            "process_id": child.id(),
+            "start_time_utc_ticks": 640_000_000_000_000_000i64,
+            "executable_path": comspec().to_string_lossy(),
+        });
+        fs::write(
+            directory.join(RUNTIME_STATE_FILE_NAME),
+            state.to_string().as_bytes(),
+        )
+        .unwrap();
+
+        let runtime = ManagedRuntime::start(&directory, &fake, "{}", None, 64).unwrap();
+        assert!(
+            matches!(child.try_wait(), Ok(None)),
+            "a PID whose start time differs must survive recovery"
+        );
+        drop(job);
+        for thread in reader_threads {
+            let _ = thread.join();
+        }
+        runtime.stop();
+        drop(runtime);
+        fs::remove_dir_all(&directory).ok();
+    }
+
+    #[test]
+    fn orphan_recovery_ignores_different_executable() {
+        let directory = temp_directory("orphan-exe");
+        let fake = fake_sing_box(&directory, "1.13.0");
+        let (mut child, reader_threads, _logs, job) =
+            spawn_managed_raw(&fake, &["run", "-c", "none"], 32).unwrap();
+        // Correct PID + start time but a different recorded executable: the
+        // identity proof fails, so recovery must not kill it.
+        let state = serde_json::json!({
+            "process_id": child.id(),
+            "start_time_utc_ticks": process_start_ticks(child.id()).unwrap_or(0),
+            "executable_path": r"C:\elsewhere\sing-box.exe",
+        });
+        fs::write(
+            directory.join(RUNTIME_STATE_FILE_NAME),
+            state.to_string().as_bytes(),
+        )
+        .unwrap();
+
+        let runtime = ManagedRuntime::start(&directory, &fake, "{}", None, 64).unwrap();
+        assert!(
+            matches!(child.try_wait(), Ok(None)),
+            "a process whose executable differs must survive recovery"
+        );
+        drop(job);
+        for thread in reader_threads {
+            let _ = thread.join();
+        }
+        runtime.stop();
+        drop(runtime);
+        fs::remove_dir_all(&directory).ok();
+    }
+
+    #[test]
+    fn apply_replaces_process_and_config() {
+        let directory = temp_directory("apply-ok");
+        let fake = branching_fake_sing_box(&directory);
+        let runtime = ManagedRuntime::start(&directory, &fake, "{}", None, 64).unwrap();
+        let first_pid = runtime.status().process_id;
+
+        let outcome = runtime.apply("{\"generation\":2}");
+        assert!(outcome.is_ok(), "error: {:?}", outcome.error);
+        let status = runtime.status();
+        assert_eq!(status.state, RuntimeState::Running);
+        assert!(status.is_running);
+        assert_ne!(status.process_id, first_pid, "replacement must be a new process");
+        let on_disk = fs::read_to_string(directory.join(GENERATED_CONFIG_FILE_NAME)).unwrap();
+        assert!(on_disk.contains("generation"), "config file: {on_disk}");
+        assert!(directory.join(RUNTIME_STATE_FILE_NAME).is_file());
+
+        runtime.stop();
+        drop(runtime);
+        fs::remove_dir_all(&directory).ok();
+    }
+
+    #[test]
+    fn apply_replacement_exit_rolls_back_previous_process() {
+        let directory = temp_directory("apply-rollback");
+        let fake = branching_fake_sing_box(&directory);
+        let runtime = ManagedRuntime::start(&directory, &fake, "{}", None, 64).unwrap();
+        let first_pid = runtime.status().process_id;
+
+        // The replacement reads the config, sees the crash marker, exits
+        // during startup: rollback must restore the previous config bytes
+        // and restart the previous executable.
+        let outcome = runtime.apply("{\"crash-config\":true}");
+        let error = outcome.error.expect("rollback must surface an error");
+        assert!(error.contains("restored and restarted"), "error: {error}");
+
+        let status = runtime.status();
+        assert_eq!(status.state, RuntimeState::RunningStale);
+        assert!(status.is_running, "rollback must leave a running process");
+        assert_ne!(status.process_id, first_pid, "rollback restarts a new instance of the previous config");
+        let on_disk = fs::read_to_string(directory.join(GENERATED_CONFIG_FILE_NAME)).unwrap();
+        assert_eq!(on_disk, "{}", "previous config bytes must be restored");
+
+        runtime.stop();
+        drop(runtime);
+        fs::remove_dir_all(&directory).ok();
+    }
+
+    #[test]
+    fn apply_check_failure_preserves_running_process() {
+        let directory = temp_directory("apply-check");
+        let fake = branching_fake_sing_box(&directory);
+        let runtime = ManagedRuntime::start(&directory, &fake, "{}", None, 64).unwrap();
+        let first_pid = runtime.status().process_id;
+
+        let outcome = runtime.apply("{\"bad-check\":true}");
+        let error = outcome.error.expect("check failure must surface an error");
+        assert!(error.contains("check failed"), "error: {error}");
+
+        let status = runtime.status();
+        assert_eq!(status.state, RuntimeState::RunningStale);
+        assert!(status.is_running);
+        assert_eq!(status.process_id, first_pid, "the old process must be untouched");
+        let on_disk = fs::read_to_string(directory.join(GENERATED_CONFIG_FILE_NAME)).unwrap();
+        assert_eq!(on_disk, "{}");
+
+        runtime.stop();
+        drop(runtime);
+        fs::remove_dir_all(&directory).ok();
+    }
+
+    #[test]
+    fn apply_requires_running_process() {
+        let directory = temp_directory("apply-none");
+        let fake = fake_sing_box(&directory, "1.13.0");
+        let runtime = ManagedRuntime::start(&directory, &fake, "{}", None, 64).unwrap();
+        runtime.stop();
+        let outcome = runtime.apply("{}");
+        assert!(outcome.error.unwrap_or_default().contains("running managed process"));
+        drop(runtime);
+        fs::remove_dir_all(&directory).ok();
+    }
+
+    #[test]
+    fn mark_running_stale_sets_state_and_redacts() {
+        let directory = temp_directory("stale");
+        let fake = fake_sing_box(&directory, "1.13.0");
+        let secret = format!("canary-{:x}", std::process::id());
+        let runtime = ManagedRuntime::start(&directory, &fake, "{}", None, 64).unwrap();
+        runtime.mark_running_stale(&format!(
+            "configuration changed; process uses the previous config (password={secret})"
+        ));
+        let status = runtime.status();
+        assert_eq!(status.state, RuntimeState::RunningStale);
+        assert!(status.is_running);
+        let error = status.last_error.unwrap_or_default();
+        assert!(error.contains("previous config"), "error: {error}");
+        assert!(error.contains("password=***"), "error must be redacted: {error}");
+        assert!(!error.contains(&secret), "error must not carry the canary: {error}");
+
+        // A successful apply clears the stale state.
+        let outcome = runtime.apply("{}");
+        assert!(outcome.is_ok(), "{:?}", outcome.error);
+        assert_eq!(runtime.status().state, RuntimeState::Running);
+        runtime.stop();
+        drop(runtime);
         fs::remove_dir_all(&directory).ok();
     }
 }
