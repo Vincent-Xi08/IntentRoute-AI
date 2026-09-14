@@ -9,5 +9,5 @@ license.workspace = true
 intentroute-core = { path = "../intentroute-core" }
 serde = { workspace = true }
 serde_json = { workspace = true }
-eframe = "0.28"
+eframe = { version = "0.28", features = ["wgpu"] }
 rfd = "0.14"

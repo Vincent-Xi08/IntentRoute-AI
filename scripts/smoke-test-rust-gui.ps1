@@ -26,10 +26,15 @@ $markerVariable = 'INTENTROUTE_GUI_SMOKE_MARKER'
 $markerPath = Join-Path ([System.IO.Path]::GetTempPath()) (
     'intentroute-gui-smoke-' + [Guid]::NewGuid().ToString('N') + '.txt')
 $previousMarkerPath = [Environment]::GetEnvironmentVariable($markerVariable, 'Process')
+# Hosted CI runners have no GPU: force the wgpu backend, which falls back to
+# the D3D12 WARP software adapter. Machines with a real GPU render identically.
+$rendererVariable = 'INTENTROUTE_GUI_RENDERER'
+$previousRenderer = [Environment]::GetEnvironmentVariable($rendererVariable, 'Process')
 
 $process = $null
 try {
     [Environment]::SetEnvironmentVariable($markerVariable, $markerPath, 'Process')
+    [Environment]::SetEnvironmentVariable($rendererVariable, 'wgpu', 'Process')
     $startInfo = [System.Diagnostics.ProcessStartInfo]::new()
     $startInfo.FileName = $resolvedExecutable
     $startInfo.WorkingDirectory = Split-Path -Parent $resolvedExecutable
@@ -119,4 +124,5 @@ finally {
     }
     Remove-Item -LiteralPath $markerPath -Force -ErrorAction SilentlyContinue
     [Environment]::SetEnvironmentVariable($markerVariable, $previousMarkerPath, 'Process')
+    [Environment]::SetEnvironmentVariable($rendererVariable, $previousRenderer, 'Process')
 }

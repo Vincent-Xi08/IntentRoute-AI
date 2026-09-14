@@ -2607,7 +2607,20 @@ impl eframe::App for ConsoleApp {
 fn main() -> eframe::Result<()> {
     let zh = resolve_language();
     let title = if zh { ZH.title } else { EN.title };
+    // Glow (OpenGL) is the default; INTENTROUTE_GUI_RENDERER=wgpu selects the
+    // wgpu backend, which falls back to the D3D12 WARP software adapter on
+    // machines without a GPU (CI runners).
+    let renderer = match std::env::var("INTENTROUTE_GUI_RENDERER")
+        .unwrap_or_default()
+        .trim()
+        .to_ascii_lowercase()
+        .as_str()
+    {
+        "wgpu" => eframe::Renderer::Wgpu,
+        _ => eframe::Renderer::Glow,
+    };
     let options = eframe::NativeOptions {
+        renderer,
         viewport: egui::ViewportBuilder::default()
             .with_inner_size([1100.0, 720.0])
             .with_min_inner_size([860.0, 560.0])
