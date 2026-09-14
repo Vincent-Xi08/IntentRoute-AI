@@ -105,6 +105,15 @@ struct UiStrings {
     constraints_protocol_any: &'static str,
     constraints_save: &'static str,
     constraints_invalid: &'static str,
+    // Rule add / delete (parity slice 2)
+    delete_rule: &'static str,
+    confirm_delete_fmt: &'static str, // {rule}
+    add_rule: &'static str,
+    add_title: &'static str,
+    add_process_label: &'static str,
+    add_process_hint: &'static str,
+    add_mode_label: &'static str,
+    add_duplicate: &'static str,
 }
 
 const ZH: UiStrings = UiStrings {
@@ -167,6 +176,14 @@ const ZH: UiStrings = UiStrings {
     constraints_protocol_any: "不限",
     constraints_save: "保存",
     constraints_invalid: "约束格式无效，修正后才能保存",
+    delete_rule: "删除规则",
+    confirm_delete_fmt: "删除规则 {rule}？此操作不可撤销。",
+    add_rule: "添加规则",
+    add_title: "添加规则（原子写入）",
+    add_process_label: "进程名（如 chrome.exe 或 *）",
+    add_process_hint: "仅精确进程名；* 表示全局规则",
+    add_mode_label: "模式",
+    add_duplicate: "同名进程的完整身份已存在，拒绝添加。",
 };
 
 const EN: UiStrings = UiStrings {
@@ -229,6 +246,14 @@ const EN: UiStrings = UiStrings {
     constraints_protocol_any: "any",
     constraints_save: "save",
     constraints_invalid: "invalid constraint format — fix before saving",
+    delete_rule: "delete rule",
+    confirm_delete_fmt: "delete rule {rule}? This cannot be undone.",
+    add_rule: "add rule",
+    add_title: "add rule (atomic commit)",
+    add_process_label: "process name (e.g. chrome.exe or *)",
+    add_process_hint: "exact process names only; * is the global rule",
+    add_mode_label: "mode",
+    add_duplicate: "a rule with the same full identity already exists; refused.",
 };
 
 /// Constraint error names from the core are English; map to Chinese for the
@@ -369,6 +394,7 @@ struct ConsoleApp {
     status: String,
     pending_edit: Option<PendingEdit>,
     constraints_draft: Option<ConstraintsDraft>,
+    add_draft: Option<AddDraft>,
 }
 
 /// One confirmed edit intention; performed under the management lock.
@@ -385,6 +411,12 @@ enum PendingEdit {
         ports: String,
         protocol: String,
     },
+    /// Delete the rule (after explicit confirmation).
+    DeleteRule { rule_id: String },
+    /// Add a rule with a fresh id, enabled, next priority, and the given
+    /// process/mode — rejected inside the transaction when the full identity
+    /// already exists.
+    AddRule { exe_name: String, mode: ProxyMode },
 }
 
 /// Editing buffer for the constraints dialog (phase parity slice).
@@ -395,6 +427,25 @@ struct ConstraintsDraft {
     ips: String,
     ports: String,
     protocol: usize, // index into the fixed protocol list
+}
+
+/// Editing buffer for the add-rule dialog.
+#[derive(Clone)]
+struct AddDraft {
+    exe_name: String,
+    mode: usize, // 0 proxy, 1 direct, 2 block
+}
+
+/// Random GUID-ish id for newly added rules (the WPF app uses Guid.NewGuid).
+fn new_rule_id() -> String {
+    format!(
+        "r-{:x}-{:x}",
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_nanos())
+            .unwrap_or(0),
+        std::process::id()
+    )
 }
 
 impl ConsoleApp {
@@ -414,6 +465,7 @@ impl ConsoleApp {
             status: s.status_none.to_string(),
             pending_edit: None,
             constraints_draft: None,
+            add_draft: None,
         };
         if let Some(appdata) = std::env::var_os("APPDATA") {
             let default = PathBuf::from(appdata).join("IntentRouteAI").join("config.json");
@@ -538,6 +590,47 @@ impl ConsoleApp {
                 LoadStatus::Missing => return Err(s.status_failed.to_string()),
                 LoadStatus::Unusable(_, reason) => return Err(reason),
             };
+            // Add-duplicate check runs against the freshly loaded state so a
+            // same-identity rule (possibly added by another editor after this
+            // view was loaded) is still refused.
+            if let PendingEdit::AddRule { exe_name, mode } = edit {
+                use intentroute_core::rule_identity_key;
+                let draft = ProxyRule {
+                    exe_name: exe_name.clone(),
+                    mode: *mode,
+                    priority: workspace
+                        .snapshot()
+                        .rules
+                        .iter()
+                        .map(|r| r.priority)
+                        .max()
+                        .unwrap_or(0)
+                        + 10,
+                    is_enabled: true,
+                    ..ProxyRule::new(new_rule_id(), exe_name)
+                };
+                let draft_key = rule_identity_key(&draft);
+                if workspace
+                    .snapshot()
+                    .rules
+                    .iter()
+                    .any(|r| rule_identity_key(r).eq_ignore_ascii_case(&draft_key))
+                {
+                    return Err(s.add_duplicate.to_string());
+                }
+            }
+
+            let rule_id_for_add = matches!(edit, PendingEdit::AddRule { .. })
+                .then(new_rule_id)
+                .unwrap_or_default();
+            let priority_for_add = workspace
+                .snapshot()
+                .rules
+                .iter()
+                .map(|r| r.priority)
+                .max()
+                .unwrap_or(0)
+                + 10;
             workspace.commit(|candidate| match edit {
                 PendingEdit::ToggleEnabled { rule_id } => {
                     if let Some(rule) = candidate.rules.iter_mut().find(|r| &r.id == rule_id) {
@@ -562,6 +655,18 @@ impl ConsoleApp {
                         rule.target_ports = ports.clone();
                         rule.protocol = protocol.clone();
                     }
+                }
+                PendingEdit::DeleteRule { rule_id } => {
+                    candidate.rules.retain(|r| &r.id != rule_id);
+                }
+                PendingEdit::AddRule { exe_name, mode } => {
+                    candidate.rules.push(ProxyRule {
+                        exe_name: exe_name.clone(),
+                        mode: *mode,
+                        priority: priority_for_add,
+                        is_enabled: true,
+                        ..ProxyRule::new(rule_id_for_add, exe_name)
+                    });
                 }
             })
         });
@@ -757,6 +862,12 @@ impl eframe::App for ConsoleApp {
                             if ui.button(s.edit_constraints).clicked() {
                                 open_constraints = Some(rule.id.clone());
                             }
+                            ui.separator();
+                            if ui.button(RichText::new(s.delete_rule).color(RED)).clicked() {
+                                requested_edit = Some(PendingEdit::DeleteRule {
+                                    rule_id: rule.id.clone(),
+                                });
+                            }
                         });
                     });
             }
@@ -790,6 +901,13 @@ impl eframe::App for ConsoleApp {
                 ui.separator();
                 if ui.button(s.reload_short).clicked() {
                     action_reload = true;
+                }
+                ui.separator();
+                if ui.button(s.add_rule).clicked() {
+                    self.add_draft = Some(AddDraft {
+                        exe_name: String::new(),
+                        mode: 0,
+                    });
                 }
             });
             ui.add_space(6.0);
@@ -938,9 +1056,13 @@ impl eframe::App for ConsoleApp {
         let mut confirmed = false;
         let mut cancelled = false;
         if let Some(edit) = self.pending_edit.clone() {
-            // Constraints edits skip the generic dialog: the editor window with
-            // its live validation and gated Save was the confirmation.
-            let needs_dialog = !matches!(edit, PendingEdit::UpdateConstraints { .. });
+            // Constraints and add edits skip the generic dialog: their editor
+            // windows (with live validation / explicit fields) were the
+            // confirmation. Delete keeps the destructive-action dialog.
+            let needs_dialog = !matches!(
+                edit,
+                PendingEdit::UpdateConstraints { .. } | PendingEdit::AddRule { .. }
+            );
             let message = match &edit {
                 PendingEdit::ToggleEnabled { rule_id } => {
                     let Some(rule) = self.rules.iter().find(|r| &r.id == rule_id) else {
@@ -962,6 +1084,14 @@ impl eframe::App for ConsoleApp {
                         .replace("{mode}", Self::mode_label(*mode, s))
                 }
                 PendingEdit::UpdateConstraints { .. } => String::new(),
+                PendingEdit::DeleteRule { rule_id } => {
+                    let Some(rule) = self.rules.iter().find(|r| &r.id == rule_id) else {
+                        self.pending_edit = None;
+                        return;
+                    };
+                    s.confirm_delete_fmt.replace("{rule}", &rule.exe_name)
+                }
+                PendingEdit::AddRule { .. } => String::new(),
             };
             if !needs_dialog {
                 let edit = self.pending_edit.take().unwrap();
@@ -1080,6 +1210,69 @@ impl eframe::App for ConsoleApp {
                 if let Some(edit) = self.pending_edit.take() {
                     self.perform_edit(&edit);
                 }
+            }
+        }
+
+        // Add-rule dialog: explicit process name + mode, enabled by default;
+        // the duplicate check runs inside the transaction.
+        if self.add_draft.is_some() {
+            let mut close = false;
+            let mut add_requested = false;
+            egui::Window::new(s.add_title)
+                .collapsible(false)
+                .resizable(false)
+                .anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0])
+                .show(ctx, |ui| {
+                    let draft = self.add_draft.as_mut().unwrap();
+                    ui.label(s.add_process_label);
+                    ui.add(egui::TextEdit::singleline(&mut draft.exe_name).desired_width(320.0));
+                    ui.label(RichText::new(s.add_process_hint).color(MUTED).small());
+                    ui.add_space(6.0);
+                    ui.label(s.add_mode_label);
+                    ui.horizontal(|ui| {
+                        let labels = [s.mode_proxy, s.mode_direct, s.mode_block];
+                        for (index, label) in labels.iter().enumerate() {
+                            if ui
+                                .selectable_label(draft.mode == index, *label)
+                                .clicked()
+                            {
+                                draft.mode = index;
+                            }
+                        }
+                    });
+                    ui.add_space(8.0);
+                    ui.horizontal(|ui| {
+                        if ui.button(s.confirm_cancel).clicked() {
+                            close = true;
+                        }
+                        let name = self.add_draft.as_ref().unwrap().exe_name.trim().to_string();
+                        let valid = !name.is_empty()
+                            && (name == "*"
+                                || (!name.contains(['*', '?', '/', '\\', ':'])
+                                    && name.chars().all(|c| !c.is_control())));
+                        if ui
+                            .add_enabled(valid, egui::Button::new(s.constraints_save))
+                            .clicked()
+                        {
+                            add_requested = true;
+                        }
+                    });
+                });
+            if close {
+                self.add_draft = None;
+            }
+            if add_requested {
+                let draft = self.add_draft.take().unwrap();
+                let mode = match draft.mode {
+                    1 => ProxyMode::Direct,
+                    2 => ProxyMode::Block,
+                    _ => ProxyMode::Proxy,
+                };
+                let edit = PendingEdit::AddRule {
+                    exe_name: draft.exe_name.trim().to_string(),
+                    mode,
+                };
+                self.perform_edit(&edit);
             }
         }
 
