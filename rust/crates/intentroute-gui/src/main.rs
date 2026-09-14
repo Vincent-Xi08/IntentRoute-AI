@@ -145,6 +145,19 @@ struct UiStrings {
     finding_global_proxy: &'static str,
     finding_clean: &'static str,
     finding_count_fmt: &'static str, // {count}
+    // Route simulator (parity slice 6)
+    sim_toggle: &'static str,
+    sim_title: &'static str,
+    sim_process: &'static str,
+    sim_dest: &'static str,
+    sim_dest_ip: &'static str,
+    sim_dest_domain: &'static str,
+    sim_port: &'static str,
+    sim_transport: &'static str,
+    sim_run: &'static str,
+    sim_result_matched_fmt: &'static str, // {rule} {mode}
+    sim_result_fallback: &'static str,
+    sim_result_invalid: &'static str,
 }
 
 const ZH: UiStrings = UiStrings {
@@ -242,6 +255,18 @@ const ZH: UiStrings = UiStrings {
     finding_global_proxy: "全局代理但无可用服务器",
     finding_clean: "未发现可确定的问题。",
     finding_count_fmt: "共 {count} 项发现",
+    sim_toggle: "路由推演",
+    sim_title: "路由推演（严格静态 what-if，不解析 DNS、不探测、不观察流量）",
+    sim_process: "进程名",
+    sim_dest: "目标",
+    sim_dest_ip: "IP",
+    sim_dest_domain: "域名",
+    sim_port: "端口",
+    sim_transport: "协议",
+    sim_run: "推演",
+    sim_result_matched_fmt: "命中规则 {rule} → {mode}",
+    sim_result_fallback: "无规则命中（全局回退）",
+    sim_result_invalid: "查询无效",
 };
 
 const EN: UiStrings = UiStrings {
@@ -339,6 +364,18 @@ const EN: UiStrings = UiStrings {
     finding_global_proxy: "global proxy mode without an available server",
     finding_clean: "No determinable issues found.",
     finding_count_fmt: "{count} finding(s)",
+    sim_toggle: "route simulator",
+    sim_title: "route simulator (strict static what-if — no DNS, no probes, no traffic)",
+    sim_process: "process",
+    sim_dest: "destination",
+    sim_dest_ip: "IP",
+    sim_dest_domain: "domain",
+    sim_port: "port",
+    sim_transport: "transport",
+    sim_run: "simulate",
+    sim_result_matched_fmt: "matched rule {rule} → {mode}",
+    sim_result_fallback: "no rule matched (global fallback)",
+    sim_result_invalid: "invalid query",
 };
 
 /// Constraint error names from the core are English; map to Chinese for the
@@ -483,6 +520,14 @@ struct ConsoleApp {
     servers_open: bool,
     server_drafts: Vec<(String, ProxyServerEdit)>,
     policy_open: bool,
+    sim_open: bool,
+    sim_process: String,
+    sim_dest: String,
+    sim_is_ip: bool,
+    sim_port: String,
+    sim_is_udp: bool,
+    sim_result: Option<String>,
+    sim_result_ok: bool,
 }
 
 /// One confirmed edit intention; performed under the management lock.
@@ -575,6 +620,14 @@ impl ConsoleApp {
             servers_open: false,
             server_drafts: Vec::new(),
             policy_open: false,
+            sim_open: false,
+            sim_process: String::new(),
+            sim_dest: String::new(),
+            sim_is_ip: false,
+            sim_port: String::from("443"),
+            sim_is_udp: false,
+            sim_result: None,
+            sim_result_ok: false,
         };
         if let Some(appdata) = std::env::var_os("APPDATA") {
             let default = PathBuf::from(appdata).join("IntentRouteAI").join("config.json");
@@ -1125,6 +1178,99 @@ impl eframe::App for ConsoleApp {
             }
         }
 
+        // Route simulator panel (parity slice 6)
+        if self.sim_open {
+            egui::TopBottomPanel::bottom("simulator")
+                .frame(
+                    egui::Frame::default()
+                        .fill(CARD)
+                        .stroke(egui::Stroke::new(1.0, BORDER))
+                        .inner_margin(egui::Margin::symmetric(10.0, 8.0)),
+                )
+                .show(ctx, |ui| {
+                    ui.label(RichText::new(s.sim_title).strong().color(ACCENT).small());
+                    ui.add_space(4.0);
+                    ui.horizontal(|ui| {
+                        ui.label(s.sim_process);
+                        egui::TextEdit::singleline(&mut self.sim_process)
+                            .hint_text("chrome.exe")
+                            .desired_width(140.0)
+                            .show(ui);
+                        ui.separator();
+                        ui.label(s.sim_dest);
+                        egui::TextEdit::singleline(&mut self.sim_dest)
+                            .hint_text("github.com")
+                            .desired_width(180.0)
+                            .show(ui);
+                        if ui
+                            .selectable_label(!self.sim_is_ip, s.sim_dest_domain)
+                            .clicked()
+                        {
+                            self.sim_is_ip = false;
+                        }
+                        if ui.selectable_label(self.sim_is_ip, s.sim_dest_ip).clicked() {
+                            self.sim_is_ip = true;
+                        }
+                        ui.separator();
+                        ui.label(s.sim_port);
+                        egui::TextEdit::singleline(&mut self.sim_port)
+                            .desired_width(60.0)
+                            .show(ui);
+                        ui.separator();
+                        ui.label(s.sim_transport);
+                        if ui.selectable_label(!self.sim_is_udp, "TCP").clicked() {
+                            self.sim_is_udp = false;
+                        }
+                        if ui.selectable_label(self.sim_is_udp, "UDP").clicked() {
+                            self.sim_is_udp = true;
+                        }
+                        ui.separator();
+                        if ui.button(s.sim_run).clicked() {
+                            if let Some(config) = &self.config {
+                                let port = self.sim_port.trim().parse::<u16>().unwrap_or(0);
+                                let query = intentroute_core::route_sim::RouteQuery {
+                                    process: self.sim_process.clone(),
+                                    destination: self.sim_dest.clone(),
+                                    is_ip: self.sim_is_ip,
+                                    port,
+                                    is_udp: self.sim_is_udp,
+                                };
+                                match intentroute_core::route_sim::simulate(&query, config) {
+                                    intentroute_core::route_sim::RouteDecision::Matched {
+                                        exe_name,
+                                        mode,
+                                    } => {
+                                        self.sim_result = Some(
+                                            s.sim_result_matched_fmt
+                                                .replace("{rule}", &exe_name)
+                                                .replace("{mode}", Self::mode_label(mode, s)),
+                                        );
+                                        self.sim_result_ok = true;
+                                    }
+                                    intentroute_core::route_sim::RouteDecision::NoMatch => {
+                                        self.sim_result = Some(s.sim_result_fallback.to_string());
+                                        self.sim_result_ok = true;
+                                    }
+                                    intentroute_core::route_sim::RouteDecision::InvalidQuery(r) => {
+                                        self.sim_result =
+                                            Some(format!("{}: {}", s.sim_result_invalid, r));
+                                        self.sim_result_ok = false;
+                                    }
+                                }
+                            }
+                        }
+                    });
+                    if let Some(result) = &self.sim_result {
+                        ui.add_space(2.0);
+                        ui.label(
+                            RichText::new(result)
+                                .color(if self.sim_result_ok { GREEN } else { RED })
+                                .strong(),
+                        );
+                    }
+                });
+        }
+
         // Policy check panel (parity slice 5): KPI stats + basic findings,
         // all local using existing core modules.
         if self.policy_open {
@@ -1252,6 +1398,9 @@ impl eframe::App for ConsoleApp {
                 }
                 if ui.button(s.policy_check).clicked() {
                     self.policy_open = !self.policy_open;
+                }
+                if ui.button(s.sim_toggle).clicked() {
+                    self.sim_open = !self.sim_open;
                 }
             });
             ui.add_space(6.0);

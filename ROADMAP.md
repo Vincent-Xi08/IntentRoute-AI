@@ -193,7 +193,8 @@ The roadmap is evidence-driven. Items move forward when implementation, tests, a
 - [x] Parity slice 3 (2026-09-14): proxy-server editor (type/loopback-host/port/credentials/enabled with live core `try_normalize` validation, masked password field, per-server locked transactions, DPAPI re-encryption on every save); live-verified port edit + restore against the real configuration
 - [x] Parity slice 4 (2026-09-14): rule move up/down — canonical-order swap + persisted-list rewrite + full priority renumber as (i+1)*10 (exact WPF `MoveRule` semantics); live-verified with a two-rule configuration
 - [x] Parity slice 5 (2026-09-14): policy check panel — KPI stats + identity duplicates + proxy-availability + chain-reference findings using existing core modules (local only); live-verified with a clean report
-- [ ] Phase 3 final: remaining page parity (monitor log, route simulator, full Policy Intelligence engine), then replace the WPF front end once proven; the WPF product remains supported until then
+- [x] Parity slice 6 (2026-09-14): route decision simulator — core `route_sim` module (10 tests: match/fallback/invalid across process, domain, IP-CIDR, port, protocol, ordering, disabled-skip) + console panel; live-verified matched-rule and invalid-query results
+- [ ] Phase 3 final: monitor log page, full Policy Intelligence engine, then replace the WPF front end once proven; the WPF product remains supported until then
 
 ## Candidate next work
 
