@@ -12,7 +12,7 @@ param(
 # Smoke gate for the Rust rules console (migration shell): the release
 # binary must create its main window, actually render frames (proven by a
 # marker file written after three frames), and accept a normal window-close
-# request with a clean zero exit — mirroring the WPF packaged smoke test at
+# request with a clean zero exit - mirroring the WPF packaged smoke test at
 # the depth egui supports (no UIA automation ids to assert).
 $ErrorActionPreference = 'Stop'
 $root = Split-Path -Parent $PSScriptRoot
@@ -32,16 +32,19 @@ $rendererVariable = 'INTENTROUTE_GUI_RENDERER'
 $previousRenderer = [Environment]::GetEnvironmentVariable($rendererVariable, 'Process')
 
 $process = $null
+$stderrPath = Join-Path ([System.IO.Path]::GetTempPath()) (
+    'intentroute-gui-smoke-err-' + [Guid]::NewGuid().ToString('N') + '.txt')
 try {
     [Environment]::SetEnvironmentVariable($markerVariable, $markerPath, 'Process')
     [Environment]::SetEnvironmentVariable($rendererVariable, 'wgpu', 'Process')
     $startInfo = [System.Diagnostics.ProcessStartInfo]::new()
     $startInfo.FileName = $resolvedExecutable
     $startInfo.WorkingDirectory = Split-Path -Parent $resolvedExecutable
-    # Shell execute (like the WPF smoke test): the marker variable set on
-    # this process propagates naturally, and the child inherits no console
-    # handles that could outlive this script and wedge a CI pipe.
-    $startInfo.UseShellExecute = $true
+    # Output goes to files (not inherited pipes), so a wedged child can never
+    # hold this script's console open, and failures carry the app's own error
+    # text into the CI log.
+    $startInfo.UseShellExecute = $false
+    $startInfo.StandardErrorPath = $stderrPath
 
     $process = [System.Diagnostics.Process]::new()
     $process.StartInfo = $startInfo
@@ -49,14 +52,21 @@ try {
         throw 'intentroute-gui.exe did not start.'
     }
 
-    # Phase 1 — the main window must appear with its title.
+    function Get-AppDiagnostic {
+        if (Test-Path -LiteralPath $stderrPath -PathType Leaf) {
+            return (Get-Content -Raw -LiteralPath $stderrPath).Trim()
+        }
+        return 'No stderr was produced by intentroute-gui.exe.'
+    }
+
+    # Phase 1 - the main window must appear with its title.
     $launchDeadline = [DateTime]::UtcNow.AddSeconds($LaunchTimeoutSeconds)
     $title = ''
     while ([DateTime]::UtcNow -lt $launchDeadline) {
         Start-Sleep -Milliseconds 250
         $process.Refresh()
         if ($process.HasExited) {
-            throw "intentroute-gui.exe exited before creating its main window (exit code $($process.ExitCode))."
+            throw "intentroute-gui.exe exited before creating its main window (exit code $($process.ExitCode)).`n$(Get-AppDiagnostic)"
         }
         if ($process.MainWindowHandle -ne [IntPtr]::Zero) {
             # The title can lag the handle by a beat; wait for both.
@@ -67,13 +77,13 @@ try {
         }
     }
     if ([string]::IsNullOrWhiteSpace($title)) {
-        throw "intentroute-gui.exe did not expose a main window title within $LaunchTimeoutSeconds seconds."
+        throw "intentroute-gui.exe did not expose a main window title within $LaunchTimeoutSeconds seconds.`n$(Get-AppDiagnostic)"
     }
     if (-not $title.Contains('IntentRoute AI')) {
         throw "intentroute-gui.exe created an unexpected main-window title: '$title'."
     }
 
-    # Phase 2 — the render loop must actually run (marker after 3 frames).
+    # Phase 2 - the render loop must actually run (marker after 3 frames).
     $markerDeadline = [DateTime]::UtcNow.AddSeconds($LaunchTimeoutSeconds)
     while ([DateTime]::UtcNow -lt $markerDeadline) {
         if (Test-Path -LiteralPath $markerPath -PathType Leaf) {
@@ -82,11 +92,11 @@ try {
         Start-Sleep -Milliseconds 250
         $process.Refresh()
         if ($process.HasExited) {
-            throw "intentroute-gui.exe exited before rendering three frames (exit code $($process.ExitCode))."
+            throw "intentroute-gui.exe exited before rendering three frames (exit code $($process.ExitCode)).`n$(Get-AppDiagnostic)"
         }
     }
     if (-not (Test-Path -LiteralPath $markerPath -PathType Leaf)) {
-        throw "intentroute-gui.exe did not write the render marker within $LaunchTimeoutSeconds seconds."
+        throw "intentroute-gui.exe did not write the render marker within $LaunchTimeoutSeconds seconds.`n$(Get-AppDiagnostic)"
     }
     $marker = (Get-Content -Raw -LiteralPath $markerPath).Trim()
     if ($marker -notmatch 'rendered=') {
@@ -94,7 +104,7 @@ try {
     }
     Write-Host "Render marker: $marker"
 
-    # Phase 3 — a normal close request must be accepted with a clean exit.
+    # Phase 3 - a normal close request must be accepted with a clean exit.
     if (-not $process.CloseMainWindow()) {
         throw 'intentroute-gui.exe did not accept a normal window-close request.'
     }
@@ -103,7 +113,7 @@ try {
     }
     $process.WaitForExit()
     if ($process.ExitCode -ne 0) {
-        throw "intentroute-gui.exe returned exit code $($process.ExitCode) after a normal close."
+        throw "intentroute-gui.exe returned exit code $($process.ExitCode) after a normal close.`n$(Get-AppDiagnostic)"
     }
 
     Write-Host 'Rust console smoke test passed: release binary created the expected window, rendered its frames, and closed cleanly.'
@@ -123,6 +133,7 @@ finally {
         $process.Dispose()
     }
     Remove-Item -LiteralPath $markerPath -Force -ErrorAction SilentlyContinue
+    Remove-Item -LiteralPath $stderrPath -Force -ErrorAction SilentlyContinue
     [Environment]::SetEnvironmentVariable($markerVariable, $previousMarkerPath, 'Process')
     [Environment]::SetEnvironmentVariable($rendererVariable, $previousRenderer, 'Process')
 }
