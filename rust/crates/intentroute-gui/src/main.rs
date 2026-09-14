@@ -26,8 +26,8 @@ use eframe::egui;
 use egui::{Color32, RichText, Sense};
 use intentroute_core::runtime_lock::with_management_lock;
 use intentroute_core::{
-    canonical_order, constraint, AppConfig, LoadStatus, ProxyMode, ProxyRule, ProxyServer,
-    ProxyType, Workspace,
+    canonical_order, constraint, AppConfig, GlobalMode, LoadStatus, ProxyMode, ProxyRule,
+    ProxyServer, ProxyType, Workspace,
 };
 use std::path::PathBuf;
 
@@ -132,6 +132,19 @@ struct UiStrings {
     // Rule move (parity slice 4)
     move_up: &'static str,
     move_down: &'static str,
+    // Policy panel (parity slice 5)
+    policy_check: &'static str,
+    policy_title: &'static str,
+    policy_active: &'static str,
+    policy_critical: &'static str,
+    policy_warning: &'static str,
+    policy_disabled: &'static str,
+    finding_duplicate: &'static str,
+    finding_no_server: &'static str,
+    finding_chain: &'static str,
+    finding_global_proxy: &'static str,
+    finding_clean: &'static str,
+    finding_count_fmt: &'static str, // {count}
 }
 
 const ZH: UiStrings = UiStrings {
@@ -217,6 +230,18 @@ const ZH: UiStrings = UiStrings {
     server_enabled_label: "启用",
     move_up: "上移",
     move_down: "下移",
+    policy_check: "策略体检",
+    policy_title: "策略体检（本地确定性分析，不发送任何数据）",
+    policy_active: "活动规则",
+    policy_critical: "高风险",
+    policy_warning: "需复核",
+    policy_disabled: "禁用草案",
+    finding_duplicate: "完全重复身份",
+    finding_no_server: "代理规则但无可用服务器",
+    finding_chain: "引用不支持的代理链",
+    finding_global_proxy: "全局代理但无可用服务器",
+    finding_clean: "未发现可确定的问题。",
+    finding_count_fmt: "共 {count} 项发现",
 };
 
 const EN: UiStrings = UiStrings {
@@ -302,6 +327,18 @@ const EN: UiStrings = UiStrings {
     server_enabled_label: "enabled",
     move_up: "move up",
     move_down: "move down",
+    policy_check: "policy check",
+    policy_title: "policy check (local deterministic analysis, nothing sent)",
+    policy_active: "active rules",
+    policy_critical: "critical",
+    policy_warning: "review",
+    policy_disabled: "disabled drafts",
+    finding_duplicate: "exact identity duplicate",
+    finding_no_server: "proxy rule without an available server",
+    finding_chain: "references unsupported proxy chain",
+    finding_global_proxy: "global proxy mode without an available server",
+    finding_clean: "No determinable issues found.",
+    finding_count_fmt: "{count} finding(s)",
 };
 
 /// Constraint error names from the core are English; map to Chinese for the
@@ -445,6 +482,7 @@ struct ConsoleApp {
     add_draft: Option<AddDraft>,
     servers_open: bool,
     server_drafts: Vec<(String, ProxyServerEdit)>,
+    policy_open: bool,
 }
 
 /// One confirmed edit intention; performed under the management lock.
@@ -536,6 +574,7 @@ impl ConsoleApp {
             add_draft: None,
             servers_open: false,
             server_drafts: Vec::new(),
+            policy_open: false,
         };
         if let Some(appdata) = std::env::var_os("APPDATA") {
             let default = PathBuf::from(appdata).join("IntentRouteAI").join("config.json");
@@ -829,6 +868,86 @@ fn protocol_stored(index: usize) -> &'static str {
     }
 }
 
+// ── Policy check (parity slice 5) ──────────────────────────────────────────
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum PolicySeverity {
+    Critical,
+    Warning,
+}
+
+struct PolicyFindingGui {
+    severity: PolicySeverity,
+    kind: &'static str,
+    detail: String,
+}
+
+/// Local deterministic analysis using existing core modules: identity
+/// duplicates, proxy availability, chain references. This is the basic
+/// subset — the full WPF engine also proves shadowing/containment and
+/// broad-scope findings, which remain WPF-only.
+fn analyze_policy(config: &AppConfig, s: &UiStrings) -> Vec<PolicyFindingGui> {
+    use intentroute_core::rule_identity_key;
+    let mut findings = Vec::new();
+
+    // Identity duplicates: same full identity key (case-insensitive).
+    let mut seen: std::collections::HashMap<String, &str> =
+        std::collections::HashMap::new();
+    for rule in &config.rules {
+        let key = rule_identity_key(rule).to_lowercase();
+        if let Some(first) = seen.get(key.as_str()) {
+            findings.push(PolicyFindingGui {
+                severity: PolicySeverity::Warning,
+                kind: s.finding_duplicate,
+                detail: format!("{} ↔ {}", first, rule.exe_name),
+            });
+        } else {
+            seen.insert(key, &rule.exe_name);
+        }
+    }
+
+    let has_enabled_server = config
+        .proxy_servers
+        .iter()
+        .any(|srv| srv.enabled);
+
+    // Proxy rules without a usable server.
+    for rule in &config.rules {
+        if rule.is_enabled
+            && rule.mode == ProxyMode::Proxy
+            && !has_enabled_server
+        {
+            findings.push(PolicyFindingGui {
+                severity: PolicySeverity::Critical,
+                kind: s.finding_no_server,
+                detail: rule.exe_name.clone(),
+            });
+        }
+    }
+
+    // Global proxy mode without a server.
+    if config.global_mode == GlobalMode::ProxyAll && !has_enabled_server {
+        findings.push(PolicyFindingGui {
+            severity: PolicySeverity::Critical,
+            kind: s.finding_global_proxy,
+            detail: String::new(),
+        });
+    }
+
+    // Chain references.
+    for rule in &config.rules {
+        if !rule.proxy_chain_id.trim().is_empty() {
+            findings.push(PolicyFindingGui {
+                severity: PolicySeverity::Critical,
+                kind: s.finding_chain,
+                detail: format!("{} → {}", rule.exe_name, rule.proxy_chain_id),
+            });
+        }
+    }
+
+    findings
+}
+
 impl eframe::App for ConsoleApp {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         let mut visuals = egui::Visuals::dark();
@@ -1006,6 +1125,80 @@ impl eframe::App for ConsoleApp {
             }
         }
 
+        // Policy check panel (parity slice 5): KPI stats + basic findings,
+        // all local using existing core modules.
+        if self.policy_open {
+            if let Some(config) = &self.config {
+                let findings = analyze_policy(config, s);
+                egui::TopBottomPanel::bottom("policy")
+                    .frame(
+                        egui::Frame::default()
+                            .fill(CARD)
+                            .stroke(egui::Stroke::new(1.0, BORDER))
+                            .inner_margin(egui::Margin::symmetric(10.0, 8.0)),
+                    )
+                    .default_height(200.0)
+                    .show(ctx, |ui| {
+                        ui.horizontal(|ui| {
+                            ui.label(RichText::new(s.policy_title).strong().color(ACCENT).small());
+                            ui.separator();
+                            ui.label(RichText::new(
+                                s.finding_count_fmt.replace("{count}", &findings.len().to_string()),
+                            )
+                            .color(MUTED)
+                            .small());
+                        });
+                        ui.add_space(4.0);
+                        // KPI row
+                        ui.horizontal(|ui| {
+                            let active = config.rules.iter().filter(|r| r.is_enabled).count();
+                            let disabled = config.rules.len() - active;
+                            let critical = findings
+                                .iter()
+                                .filter(|f| f.severity == PolicySeverity::Critical)
+                                .count();
+                            let warning = findings
+                                .iter()
+                                .filter(|f| f.severity == PolicySeverity::Warning)
+                                .count();
+                            for (label, count, color) in [
+                                (s.policy_active, active, TEXT),
+                                (s.policy_critical, critical, RED),
+                                (s.policy_warning, warning, AMBER),
+                                (s.policy_disabled, disabled, MUTED),
+                            ] {
+                                ui.vertical(|ui| {
+                                    ui.label(RichText::new(label).color(MUTED).small());
+                                    ui.label(RichText::new(format!("{count}")).size(20.0).strong().color(color));
+                                });
+                                ui.add_space(24.0);
+                            }
+                        });
+                        ui.separator();
+                        // Findings
+                        egui::ScrollArea::vertical().show(ui, |ui| {
+                            if findings.is_empty() {
+                                ui.label(RichText::new(s.finding_clean).color(GREEN).small());
+                            }
+                            for finding in &findings {
+                                let color = match finding.severity {
+                                    PolicySeverity::Critical => RED,
+                                    PolicySeverity::Warning => AMBER,
+                                };
+                                ui.horizontal(|ui| {
+                                    ui.label(RichText::new("●").color(color).small());
+                                    ui.label(
+                                        RichText::new(format!("{}: {}", finding.kind, finding.detail))
+                                            .color(MUTED)
+                                            .small(),
+                                    );
+                                });
+                            }
+                        });
+                    });
+            }
+        }
+
         egui::CentralPanel::default().show(ctx, |ui| {
             ui.horizontal(|ui| {
                 let search_before = self.search.clone();
@@ -1056,6 +1249,9 @@ impl eframe::App for ConsoleApp {
                         })
                         .unwrap_or_default();
                     self.servers_open = true;
+                }
+                if ui.button(s.policy_check).clicked() {
+                    self.policy_open = !self.policy_open;
                 }
             });
             ui.add_space(6.0);
