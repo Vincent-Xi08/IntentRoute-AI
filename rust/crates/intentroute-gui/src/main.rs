@@ -26,7 +26,8 @@ use eframe::egui;
 use egui::{Color32, RichText, Sense};
 use intentroute_core::runtime_lock::with_management_lock;
 use intentroute_core::{
-    canonical_order, constraint, AppConfig, LoadStatus, ProxyMode, ProxyRule, Workspace,
+    canonical_order, constraint, AppConfig, LoadStatus, ProxyMode, ProxyRule, ProxyServer,
+    ProxyType, Workspace,
 };
 use std::path::PathBuf;
 
@@ -114,6 +115,20 @@ struct UiStrings {
     add_process_hint: &'static str,
     add_mode_label: &'static str,
     add_duplicate: &'static str,
+    // Proxy server editor (parity slice 3)
+    edit_servers: &'static str,
+    servers_title: &'static str,
+    servers_count_fmt: &'static str, // {count}
+    server_type_socks: &'static str,
+    server_type_http: &'static str,
+    server_type_https: &'static str,
+    server_host_label: &'static str,
+    server_port_label: &'static str,
+    server_username_label: &'static str,
+    server_password_label: &'static str,
+    server_bad_host: &'static str,
+    server_bad_port: &'static str,
+    server_enabled_label: &'static str,
 }
 
 const ZH: UiStrings = UiStrings {
@@ -184,6 +199,19 @@ const ZH: UiStrings = UiStrings {
     add_process_hint: "仅精确进程名；* 表示全局规则",
     add_mode_label: "模式",
     add_duplicate: "同名进程的完整身份已存在，拒绝添加。",
+    edit_servers: "代理服务器",
+    servers_title: "代理服务器（原子写入，密码经 DPAPI 加密）",
+    servers_count_fmt: "共 {count} 个服务器",
+    server_type_socks: "SOCKS5",
+    server_type_http: "HTTP",
+    server_type_https: "HTTPS",
+    server_host_label: "回环 IP",
+    server_port_label: "端口",
+    server_username_label: "用户名（可选）",
+    server_password_label: "密码（可选，DPAPI 保存）",
+    server_bad_host: "仅支持字面量回环 IP（如 127.0.0.1 或 ::1）",
+    server_bad_port: "端口必须在 1–65535 之间",
+    server_enabled_label: "启用",
 };
 
 const EN: UiStrings = UiStrings {
@@ -254,6 +282,19 @@ const EN: UiStrings = UiStrings {
     add_process_hint: "exact process names only; * is the global rule",
     add_mode_label: "mode",
     add_duplicate: "a rule with the same full identity already exists; refused.",
+    edit_servers: "proxy servers",
+    servers_title: "proxy servers (atomic commit, DPAPI-protected passwords)",
+    servers_count_fmt: "{count} server(s)",
+    server_type_socks: "SOCKS5",
+    server_type_http: "HTTP",
+    server_type_https: "HTTPS",
+    server_host_label: "loopback IP",
+    server_port_label: "port",
+    server_username_label: "username (optional)",
+    server_password_label: "password (optional, DPAPI at rest)",
+    server_bad_host: "only a literal loopback IP such as 127.0.0.1 or ::1 is supported",
+    server_bad_port: "port must be 1–65535",
+    server_enabled_label: "enabled",
 };
 
 /// Constraint error names from the core are English; map to Chinese for the
@@ -395,6 +436,8 @@ struct ConsoleApp {
     pending_edit: Option<PendingEdit>,
     constraints_draft: Option<ConstraintsDraft>,
     add_draft: Option<AddDraft>,
+    servers_open: bool,
+    server_drafts: Vec<(String, ProxyServerEdit)>,
 }
 
 /// One confirmed edit intention; performed under the management lock.
@@ -417,6 +460,20 @@ enum PendingEdit {
     /// process/mode — rejected inside the transaction when the full identity
     /// already exists.
     AddRule { exe_name: String, mode: ProxyMode },
+    /// Replace a proxy server's editable fields (type/host/port/credentials/
+    /// enabled); the engine re-validates loopback + port and re-encrypts the
+    /// password on commit.
+    UpdateServer { server_id: String, server: ProxyServerEdit },
+}
+
+#[derive(Clone)]
+struct ProxyServerEdit {
+    pub proxy_type: u8, // 0 socks, 1 http, 2 https
+    pub host: String,
+    pub port: String,
+    pub username: String,
+    pub password: String,
+    pub enabled: bool,
 }
 
 /// Editing buffer for the constraints dialog (phase parity slice).
@@ -466,6 +523,8 @@ impl ConsoleApp {
             pending_edit: None,
             constraints_draft: None,
             add_draft: None,
+            servers_open: false,
+            server_drafts: Vec::new(),
         };
         if let Some(appdata) = std::env::var_os("APPDATA") {
             let default = PathBuf::from(appdata).join("IntentRouteAI").join("config.json");
@@ -667,6 +726,25 @@ impl ConsoleApp {
                         is_enabled: true,
                         ..ProxyRule::new(rule_id_for_add, exe_name)
                     });
+                }
+                PendingEdit::UpdateServer { server_id, server } => {
+                    let port: i32 = server.port.trim().parse().unwrap_or(-1);
+                    if let Some(target) = candidate
+                        .proxy_servers
+                        .iter_mut()
+                        .find(|srv| &srv.id == server_id)
+                    {
+                        target.proxy_type = match server.proxy_type {
+                            1 => ProxyType::Http,
+                            2 => ProxyType::Https,
+                            _ => ProxyType::Socks5,
+                        };
+                        target.host = server.host.trim().to_string();
+                        target.port = port;
+                        target.username = server.username.clone();
+                        target.password = server.password.clone();
+                        target.enabled = server.enabled;
+                    }
                 }
             })
         });
@@ -909,6 +987,35 @@ impl eframe::App for ConsoleApp {
                         mode: 0,
                     });
                 }
+                if ui.button(s.edit_servers).clicked() {
+                    self.server_drafts = self
+                        .config
+                        .as_ref()
+                        .map(|c| {
+                            c.proxy_servers
+                                .iter()
+                                .map(|srv| {
+                                    (
+                                        srv.id.clone(),
+                                        ProxyServerEdit {
+                                            proxy_type: match srv.proxy_type {
+                                                ProxyType::Http => 1,
+                                                ProxyType::Https => 2,
+                                                ProxyType::Socks5 => 0,
+                                            },
+                                            host: srv.host.clone(),
+                                            port: srv.port.to_string(),
+                                            username: srv.username.clone(),
+                                            password: srv.password.clone(),
+                                            enabled: srv.enabled,
+                                        },
+                                    )
+                                })
+                                .collect()
+                        })
+                        .unwrap_or_default();
+                    self.servers_open = true;
+                }
             });
             ui.add_space(6.0);
 
@@ -1061,7 +1168,9 @@ impl eframe::App for ConsoleApp {
             // confirmation. Delete keeps the destructive-action dialog.
             let needs_dialog = !matches!(
                 edit,
-                PendingEdit::UpdateConstraints { .. } | PendingEdit::AddRule { .. }
+                PendingEdit::UpdateConstraints { .. }
+                    | PendingEdit::AddRule { .. }
+                    | PendingEdit::UpdateServer { .. }
             );
             let message = match &edit {
                 PendingEdit::ToggleEnabled { rule_id } => {
@@ -1092,6 +1201,7 @@ impl eframe::App for ConsoleApp {
                     s.confirm_delete_fmt.replace("{rule}", &rule.exe_name)
                 }
                 PendingEdit::AddRule { .. } => String::new(),
+                PendingEdit::UpdateServer { .. } => String::new(),
             };
             if !needs_dialog {
                 let edit = self.pending_edit.take().unwrap();
@@ -1273,6 +1383,146 @@ impl eframe::App for ConsoleApp {
                     mode,
                 };
                 self.perform_edit(&edit);
+            }
+        }
+
+        // Proxy-server editor (parity slice 3): every server's editable fields
+        // with live loopback/port validation. Save performs one locked
+        // transaction per changed server; the engine re-validates and the
+        // serializer re-encrypts passwords with DPAPI.
+        if self.servers_open {
+            let mut close = false;
+            let mut save_requested = false;
+            egui::Window::new(s.servers_title)
+                .collapsible(false)
+                .resizable(true)
+                .default_width(520.0)
+                .anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0])
+                .show(ctx, |ui| {
+                    let count = self.server_drafts.len();
+                    ui.label(
+                        RichText::new(s.servers_count_fmt.replace("{count}", &count.to_string()))
+                            .color(MUTED)
+                            .small(),
+                    );
+                    ui.add_space(4.0);
+                    let mut all_valid = true;
+                    egui::ScrollArea::vertical().max_height(360.0).show(ui, |ui| {
+                        for (index, (server_id, draft)) in self.server_drafts.iter_mut().enumerate()
+                        {
+                            let host_ok = intentroute_core::try_normalize_local_endpoint(
+                                &draft.host,
+                                draft.port.trim().parse().unwrap_or(-1),
+                            )
+                            .is_ok();
+                            let port_ok = draft
+                                .port
+                                .trim()
+                                .parse::<i32>()
+                                .map(|p| (1..=65535).contains(&p))
+                                .unwrap_or(false);
+                            all_valid &= host_ok && port_ok;
+                            egui::collapsing_header::CollapsingHeader::new(format!(
+                                "{server_id} · {}",
+                                draft.host
+                            ))
+                            .default_open(index == 0)
+                            .show(ui, |ui| {
+                                egui::Grid::new(format!("server-{server_id}"))
+                                    .num_columns(2)
+                                    .spacing([16.0, 6.0])
+                                    .show(ui, |ui| {
+                                        ui.label("type");
+                                        ui.horizontal(|ui| {
+                                            let labels = [
+                                                s.server_type_socks,
+                                                s.server_type_http,
+                                                s.server_type_https,
+                                            ];
+                                            for (type_index, label) in
+                                                labels.iter().enumerate()
+                                            {
+                                                if ui
+                                                    .selectable_label(
+                                                        draft.proxy_type == type_index as u8,
+                                                        *label,
+                                                    )
+                                                    .clicked()
+                                                {
+                                                    draft.proxy_type = type_index as u8;
+                                                }
+                                            }
+                                        });
+                                        ui.end_row();
+                                        ui.label(s.server_host_label);
+                                        ui.add(
+                                            egui::TextEdit::singleline(&mut draft.host)
+                                                .desired_width(220.0),
+                                        );
+                                        ui.end_row();
+                                        ui.label(s.server_port_label);
+                                        ui.add(
+                                            egui::TextEdit::singleline(&mut draft.port)
+                                                .desired_width(120.0),
+                                        );
+                                        ui.end_row();
+                                        ui.label(s.server_username_label);
+                                        ui.add(
+                                            egui::TextEdit::singleline(&mut draft.username)
+                                                .desired_width(220.0),
+                                        );
+                                        ui.end_row();
+                                        ui.label(s.server_password_label);
+                                        ui.add(
+                                            egui::TextEdit::singleline(&mut draft.password)
+                                                .desired_width(220.0)
+                                                .password(true),
+                                        );
+                                        ui.end_row();
+                                        ui.label(s.server_enabled_label);
+                                        ui.checkbox(&mut draft.enabled, "");
+                                        ui.end_row();
+                                    });
+                                if !host_ok {
+                                    ui.label(
+                                        RichText::new(s.server_bad_host).color(RED).small(),
+                                    );
+                                }
+                                if !port_ok {
+                                    ui.label(
+                                        RichText::new(s.server_bad_port).color(RED).small(),
+                                    );
+                                }
+                            });
+                            ui.separator();
+                        }
+                    });
+                    ui.add_space(6.0);
+                    ui.horizontal(|ui| {
+                        if ui.button(s.confirm_cancel).clicked() {
+                            close = true;
+                        }
+                        if ui
+                            .add_enabled(all_valid, egui::Button::new(s.constraints_save))
+                            .clicked()
+                        {
+                            save_requested = true;
+                        }
+                    });
+                });
+            if close {
+                self.servers_open = false;
+            }
+            if save_requested {
+                self.servers_open = false;
+                let drafts = std::mem::take(&mut self.server_drafts);
+                // One transaction per changed server keeps each commit a
+                // single-purpose atomic unit, exactly like the WPF per-field
+                // save paths.
+                for (server_id, server) in drafts {
+                    let edit = PendingEdit::UpdateServer { server_id, server };
+                    self.perform_edit(&edit);
+                }
             }
         }
 

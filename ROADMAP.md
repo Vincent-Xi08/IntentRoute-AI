@@ -190,7 +190,8 @@ The roadmap is evidence-driven. Items move forward when implementation, tests, a
 - [x] Phase 3c GUI slice (2026-09-14): bounded editing in the Rust console — toggle enabled / set mode behind a confirmation dialog and one management-locked load→commit transaction (`runtime_lock` ports the WPF exclusive-handle semantics); live-verified block-while-WPF-runs and commit-after-exit; core suite at 55 tests
 - [x] Parity slice (2026-09-14): constraints editor in the Rust console (hosts/IP/ports/protocol with live shared-validator gating and the same management-locked transaction as the other edits); live-verified commit + restore against the real configuration
 - [x] Parity slice 2 (2026-09-14): rule add (fresh id, next-tens priority, in-transaction full-identity duplicate check against freshly loaded state) and delete (irreversible-action confirmation); live-verified add→delete→restore against the real configuration
-- [ ] Phase 3 final: remaining edit paths (proxy servers, priority reordering) and page parity, then replace the WPF front end once proven; the WPF product remains supported until then
+- [x] Parity slice 3 (2026-09-14): proxy-server editor (type/loopback-host/port/credentials/enabled with live core `try_normalize` validation, masked password field, per-server locked transactions, DPAPI re-encryption on every save); live-verified port edit + restore against the real configuration
+- [ ] Phase 3 final: priority reordering and remaining page parity, then replace the WPF front end once proven; the WPF product remains supported until then
 
 ## Candidate next work
 
