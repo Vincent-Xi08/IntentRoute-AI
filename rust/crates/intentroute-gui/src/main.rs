@@ -171,6 +171,29 @@ struct UiStrings {
     process_search_hint: &'static str,
     process_add_rule: &'static str,
     process_count_fmt: &'static str, // {count}
+    // Monitor / runtime log page (parity slice 11)
+    monitor_toggle: &'static str,
+    monitor_title: &'static str,
+    monitor_exe: &'static str,
+    monitor_browse: &'static str,
+    monitor_probe: &'static str,
+    monitor_start: &'static str,
+    monitor_stop: &'static str,
+    monitor_running: &'static str,
+    monitor_stopped: &'static str,
+    monitor_failed: &'static str,
+    monitor_pid: &'static str, // {pid}
+    monitor_version: &'static str, // {version}
+    monitor_logs_title: &'static str,
+    monitor_level: &'static str,
+    monitor_search_hint: &'static str,
+    monitor_clear: &'static str,
+    monitor_export: &'static str,
+    monitor_autoscroll: &'static str,
+    monitor_empty: &'static str,
+    monitor_need_config: &'static str,
+    monitor_need_exe: &'static str,
+    monitor_edit_blocked: &'static str,
     process_exists: &'static str,
 }
 
@@ -292,6 +315,28 @@ const ZH: UiStrings = UiStrings {
     process_search_hint: "进程名或 PID",
     process_add_rule: "添加为规则",
     process_count_fmt: "{count} 个进程",
+    monitor_toggle: "运行日志",
+    monitor_title: "运行监控（启动前需显式选择本机 sing-box v1.13+ 可执行文件）",
+    monitor_exe: "可执行文件：",
+    monitor_browse: "浏览…",
+    monitor_probe: "探测版本",
+    monitor_start: "启动 sing-box",
+    monitor_stop: "停止并释放",
+    monitor_running: "运行中",
+    monitor_stopped: "已停止",
+    monitor_failed: "异常退出",
+    monitor_pid: "PID {pid}",
+    monitor_version: "sing-box {version}",
+    monitor_logs_title: "运行日志（捕获时已脱敏，最多保留 200 行）",
+    monitor_level: "级别",
+    monitor_search_hint: "搜索日志",
+    monitor_clear: "清空",
+    monitor_export: "导出…",
+    monitor_autoscroll: "自动滚动",
+    monitor_empty: "暂无日志 —— 启动后 sing-box 的控制台输出会显示在这里",
+    monitor_need_config: "请先加载配置再启动 sing-box",
+    monitor_need_exe: "请先选择 sing-box 可执行文件（不会自动执行任何未确认的路径）",
+    monitor_edit_blocked: "sing-box 托管运行中：请先在「运行日志」中停止，再编辑配置",
     process_exists: "同名进程已有完整身份相同的规则，拒绝添加。",
 };
 
@@ -413,6 +458,28 @@ const EN: UiStrings = UiStrings {
     process_search_hint: "process name or PID",
     process_add_rule: "add as rule",
     process_count_fmt: "{count} processes",
+    monitor_toggle: "runtime log",
+    monitor_title: "runtime monitor (explicitly select a local sing-box v1.13+ executable before starting)",
+    monitor_exe: "executable:",
+    monitor_browse: "browse…",
+    monitor_probe: "probe version",
+    monitor_start: "start sing-box",
+    monitor_stop: "stop and release",
+    monitor_running: "running",
+    monitor_stopped: "stopped",
+    monitor_failed: "failed",
+    monitor_pid: "PID {pid}",
+    monitor_version: "sing-box {version}",
+    monitor_logs_title: "runtime log (redacted at capture, at most 200 lines kept)",
+    monitor_level: "level",
+    monitor_search_hint: "search log",
+    monitor_clear: "clear",
+    monitor_export: "export…",
+    monitor_autoscroll: "auto-scroll",
+    monitor_empty: "no log lines yet — sing-box console output appears here once started",
+    monitor_need_config: "load a configuration before starting sing-box",
+    monitor_need_exe: "select the sing-box executable first (no unapproved path is ever executed)",
+    monitor_edit_blocked: "sing-box is under management here: stop it on the runtime log page before editing configuration",
     process_exists: "a rule with the same full identity for this process already exists; refused.",
 };
 
@@ -569,6 +636,15 @@ struct ConsoleApp {
     process_open: bool,
     process_search: String,
     process_snapshot: Vec<intentroute_core::process::ProcessInfo>,
+    // Monitor / runtime log page (parity slice 11). While `monitor` is
+    // Some, the runtime lock is held and configuration edits are blocked.
+    monitor_open: bool,
+    monitor_exe_draft: String,
+    monitor_probe_result: Option<(bool, String)>,
+    monitor: Option<intentroute_core::singbox::ManagedRuntime>,
+    monitor_min_level: intentroute_core::runtime_log::LogLevel,
+    monitor_search: String,
+    monitor_auto_scroll: bool,
 }
 
 /// One confirmed edit intention; performed under the management lock.
@@ -674,6 +750,13 @@ impl ConsoleApp {
             process_open: false,
             process_search: String::new(),
             process_snapshot: Vec::new(),
+            monitor_open: false,
+            monitor_exe_draft: String::new(),
+            monitor_probe_result: None,
+            monitor: None,
+            monitor_min_level: intentroute_core::runtime_log::LogLevel::Info,
+            monitor_search: String::new(),
+            monitor_auto_scroll: true,
         };
         if let Some(appdata) = std::env::var_os("APPDATA") {
             let default = PathBuf::from(appdata).join("IntentRouteAI").join("config.json");
@@ -717,6 +800,75 @@ impl ConsoleApp {
     fn reload(&mut self) {
         if let Some(path) = self.config_path.clone() {
             self.load(&path);
+        }
+    }
+
+    /// Starts the managed sing-box for the monitor page: probe the
+    /// explicitly selected executable, build the full configuration from a
+    /// freshly workspace-loaded snapshot (DPAPI passwords are decrypted at
+    /// that boundary; the built JSON is never displayed — it carries
+    /// passwords), and hand both to the runtime engine, which holds the
+    /// management lock for as long as the process is managed.
+    fn start_monitor(&mut self) {
+        if self.monitor.is_some() {
+            return;
+        }
+        let Some(config_path) = self.config_path.clone() else {
+            self.error = Some(self.s.monitor_need_config.to_string());
+            return;
+        };
+        let exe = PathBuf::from(self.monitor_exe_draft.trim());
+        if exe.as_os_str().is_empty() {
+            self.error = Some(self.s.monitor_need_exe.to_string());
+            return;
+        }
+        let directory = config_path
+            .parent()
+            .map(PathBuf::from)
+            .unwrap_or_default();
+        // The raw display config still carries DPAPI envelopes; the runtime
+        // file needs the decrypted values, so load through the workspace.
+        let snapshot = match Workspace::load(&config_path) {
+            LoadStatus::Loaded(workspace) => workspace.snapshot().clone(),
+            LoadStatus::Missing => {
+                self.error = Some(self.s.status_failed.to_string());
+                return;
+            }
+            LoadStatus::Unusable(_, reason) => {
+                self.error = Some(reason);
+                return;
+            }
+        };
+
+        match intentroute_core::singbox::probe_version(&exe) {
+            Ok(version) => {
+                self.monitor_probe_result =
+                    Some((true, self.s.monitor_version.replace("{version}", &version)));
+                match intentroute_core::build_sing_box_config(&snapshot) {
+                    Ok(build) => {
+                        match intentroute_core::singbox::ManagedRuntime::start(
+                            &directory,
+                            &exe,
+                            &build.config_json,
+                            Some(&version),
+                            200,
+                        ) {
+                            Ok(runtime) => {
+                                self.monitor = Some(runtime);
+                            }
+                            Err(error) => {
+                                self.error = Some(error);
+                            }
+                        }
+                    }
+                    Err(error) => {
+                        self.error = Some(error);
+                    }
+                }
+            }
+            Err(error) => {
+                self.monitor_probe_result = Some((false, error));
+            }
         }
     }
 
@@ -785,6 +937,11 @@ impl ConsoleApp {
     /// workspace engine, and adopt the published snapshot. A held lock (WPF
     /// running) surfaces the localized block message.
     fn perform_edit(&mut self, edit: &PendingEdit) {
+        if self.monitor.is_some() {
+            // Our own managed runtime holds the lock; stop it first.
+            self.error = Some(self.s.monitor_edit_blocked.to_string());
+            return;
+        }
         let Some(path) = self.config_path.clone() else {
             self.error = Some(self.s.status_none.to_string());
             return;
@@ -1421,6 +1578,236 @@ impl eframe::App for ConsoleApp {
             }
         }
 
+        // Monitor / runtime log panel (parity slice 11).
+        if self.monitor_open {
+            let mut start_requested = false;
+            let mut stop_requested = false;
+            let mut probe_requested = false;
+            let mut browse_requested = false;
+            let mut clear_requested = false;
+            let mut export_requested = false;
+
+            egui::TopBottomPanel::bottom("monitor")
+                .frame(
+                    egui::Frame::default()
+                        .fill(CARD)
+                        .stroke(egui::Stroke::new(1.0, BORDER))
+                        .inner_margin(egui::Margin::symmetric(10.0, 8.0)),
+                )
+                .default_height(220.0)
+                .show(ctx, |ui| {
+                    ui.label(RichText::new(s.monitor_title).strong().color(ACCENT).small());
+                    ui.add_space(4.0);
+
+                    ui.horizontal(|ui| {
+                        ui.label(s.monitor_exe);
+                        egui::TextEdit::singleline(&mut self.monitor_exe_draft)
+                            .hint_text("sing-box.exe")
+                            .desired_width(340.0)
+                            .show(ui);
+                        if ui.button(s.monitor_browse).clicked() {
+                            browse_requested = true;
+                        }
+                        if ui.button(s.monitor_probe).clicked() {
+                            probe_requested = true;
+                        }
+                        if let Some((ok, text)) = &self.monitor_probe_result {
+                            ui.label(RichText::new(text).color(if *ok { GREEN } else { RED }).small());
+                        }
+                    });
+
+                    ui.horizontal(|ui| {
+                        let running = self
+                            .monitor
+                            .as_ref()
+                            .is_some_and(|runtime| runtime.status().is_running);
+                        if running {
+                            if ui.button(RichText::new(s.monitor_stop).strong()).clicked() {
+                                stop_requested = true;
+                            }
+                        } else if ui.button(s.monitor_start).clicked() {
+                            start_requested = true;
+                        }
+                        ui.separator();
+                        if let Some(runtime) = &self.monitor {
+                            let status = runtime.status();
+                            let state_label = match status.state {
+                                intentroute_core::singbox::RuntimeState::Running => {
+                                    RichText::new(s.monitor_running).color(GREEN)
+                                }
+                                intentroute_core::singbox::RuntimeState::Stopped => {
+                                    RichText::new(s.monitor_stopped).color(MUTED)
+                                }
+                                intentroute_core::singbox::RuntimeState::Failed => {
+                                    RichText::new(s.monitor_failed).color(RED)
+                                }
+                            };
+                            ui.label(state_label.strong());
+                            if let Some(pid) = status.process_id {
+                                ui.label(
+                                    RichText::new(s.monitor_pid.replace("{pid}", &pid.to_string()))
+                                        .color(MUTED)
+                                        .small(),
+                                );
+                            }
+                            if let Some(version) = &status.version {
+                                ui.label(
+                                    RichText::new(s.monitor_version.replace("{version}", version))
+                                        .color(MUTED)
+                                        .small(),
+                                );
+                            }
+                            if let Some(error) = &status.last_error {
+                                ui.label(RichText::new(error).color(RED).small());
+                            }
+                        }
+                    });
+
+                    ui.add_space(2.0);
+                    ui.separator();
+                    ui.horizontal(|ui| {
+                        ui.label(RichText::new(s.monitor_logs_title).color(MUTED).small());
+                        ui.separator();
+                        ui.label(RichText::new(s.monitor_level).color(MUTED).small());
+                        egui::ComboBox::new("monitor-level", "")
+                            .selected_text(self.monitor_min_level.name())
+                            .show_ui(ui, |ui| {
+                                for level in intentroute_core::runtime_log::LogLevel::all() {
+                                    ui.selectable_value(
+                                        &mut self.monitor_min_level,
+                                        level,
+                                        level.name(),
+                                    );
+                                }
+                            });
+                        egui::TextEdit::singleline(&mut self.monitor_search)
+                            .hint_text(s.monitor_search_hint)
+                            .desired_width(150.0)
+                            .show(ui);
+                        if ui.checkbox(&mut self.monitor_auto_scroll, s.monitor_autoscroll)
+                            .clicked()
+                        {
+                            // State is stored directly.
+                        }
+                        if ui.button(s.monitor_clear).clicked() {
+                            clear_requested = true;
+                        }
+                        if ui.button(s.monitor_export).clicked() {
+                            export_requested = true;
+                        }
+                    });
+
+                    let logs = self
+                        .monitor
+                        .as_ref()
+                        .map(|runtime| runtime.recent_logs())
+                        .unwrap_or_default();
+                    let filtered: Vec<&intentroute_core::runtime_log::LogLine> = logs
+                        .iter()
+                        .filter(|entry| {
+                            intentroute_core::runtime_log::matches(
+                                &entry.message,
+                                self.monitor_min_level,
+                                &self.monitor_search,
+                            )
+                        })
+                        .collect();
+                    egui::ScrollArea::vertical()
+                        .max_height(160.0)
+                        .stick_to_bottom(self.monitor_auto_scroll)
+                        .show(ui, |ui| {
+                            if filtered.is_empty() {
+                                ui.add_space(10.0);
+                                ui.label(RichText::new(s.monitor_empty).color(MUTED));
+                            }
+                            for entry in filtered {
+                                let level =
+                                    intentroute_core::runtime_log::parse_level(&entry.message)
+                                        .unwrap_or(intentroute_core::runtime_log::LogLevel::Info);
+                                let message_color = if level
+                                    >= intentroute_core::runtime_log::LogLevel::Error
+                                {
+                                    RED
+                                } else {
+                                    TEXT
+                                };
+                                ui.label(
+                                    RichText::new(format!("[{}] {}", entry.time, entry.message))
+                                        .family(egui::FontFamily::Monospace)
+                                        .color(message_color)
+                                        .small(),
+                                );
+                            }
+                        });
+                });
+
+            if browse_requested {
+                if let Some(path) = rfd::FileDialog::new()
+                    .add_filter("sing-box executable", &["exe"])
+                    .pick_file()
+                {
+                    self.monitor_exe_draft = path.display().to_string();
+                }
+            }
+            if probe_requested {
+                let exe = PathBuf::from(self.monitor_exe_draft.trim());
+                match intentroute_core::singbox::probe_version(&exe) {
+                    Ok(version) => {
+                        self.monitor_probe_result = Some((true, s.monitor_version.replace("{version}", &version)));
+                    }
+                    Err(error) => {
+                        self.monitor_probe_result = Some((false, error));
+                    }
+                }
+            }
+            if start_requested {
+                self.start_monitor();
+            }
+            if stop_requested {
+                if let Some(runtime) = self.monitor.take() {
+                    runtime.stop();
+                }
+                ctx.request_repaint();
+            }
+            if clear_requested {
+                if let Some(runtime) = &self.monitor {
+                    runtime.clear_logs();
+                }
+            }
+            if export_requested {
+                let logs = self
+                    .monitor
+                    .as_ref()
+                    .map(|runtime| runtime.recent_logs())
+                    .unwrap_or_default();
+                let filtered: Vec<intentroute_core::runtime_log::LogLine> = logs
+                    .into_iter()
+                    .filter(|entry| {
+                        intentroute_core::runtime_log::matches(
+                            &entry.message,
+                            self.monitor_min_level,
+                            &self.monitor_search,
+                        )
+                    })
+                    .collect();
+                if let Some(path) = rfd::FileDialog::new()
+                    .add_filter("text", &["txt", "log"])
+                    .set_file_name("intentroute-runtime-log.txt")
+                    .save_file()
+                {
+                    // Export text passes through redaction a second time.
+                    let text = intentroute_core::runtime_log::build_export_text(&filtered);
+                    if let Err(error) = std::fs::write(&path, text.as_bytes()) {
+                        self.error = Some(format!("{}: {error}", path.display()));
+                    }
+                }
+            }
+            if self.monitor.is_some() {
+                // Keep the log view live while the managed process runs.
+                ctx.request_repaint_after(std::time::Duration::from_millis(500));
+            }
+        }
+
         // Policy check panel (parity slice 5): KPI stats + basic findings,
         // all local using existing core modules.
         if self.policy_open {
@@ -1557,6 +1944,9 @@ impl eframe::App for ConsoleApp {
                     if self.process_open && self.process_snapshot.is_empty() {
                         self.process_snapshot = intentroute_core::process::snapshot_processes();
                     }
+                }
+                if ui.button(s.monitor_toggle).clicked() {
+                    self.monitor_open = !self.monitor_open;
                 }
                 // Global mode display + toggle (parity slice 7): showing the
                 // current persisted mode; clicking offers the other one behind

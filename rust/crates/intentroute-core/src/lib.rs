@@ -35,8 +35,10 @@ pub mod policy_findings;
 pub mod process;
 pub mod route_sim;
 pub mod runtime_lock;
+pub mod runtime_log;
 pub mod runtime_order;
 pub mod rule;
+pub mod singbox;
 pub mod workspace;
 
 pub use builder::{build as build_sing_box_config, BuildResult, DIRECT_TAG};

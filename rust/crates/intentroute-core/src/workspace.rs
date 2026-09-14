@@ -267,7 +267,7 @@ fn civil_from_days(days: i64) -> (i64, u32, u32) {
 /// write `path.<unique>.tmp`, then `ReplaceFileW` over the existing file
 /// (keeping the C# `ignoreMetadataErrors` behavior) or a plain rename when
 /// no previous file exists. Temp leftovers are cleaned best-effort.
-fn save_atomic(path: &Path, bytes: &[u8]) -> Result<(), String> {
+pub(crate) fn save_atomic(path: &Path, bytes: &[u8]) -> Result<(), String> {
     if let Some(directory) = path.parent() {
         if !directory.as_os_str().is_empty() {
             std::fs::create_dir_all(directory)

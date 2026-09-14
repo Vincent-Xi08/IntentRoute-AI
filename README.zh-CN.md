@@ -170,7 +170,7 @@ IntentRoute AI **不**提供代理节点、VPN 账号、抓包驱动、内置 AI
 
 提供方测试使用模拟 HTTP 处理器，不需要 OpenAI 密钥、付费调用、运行中的 Ollama 或已下载模型。Windows CI 还会启动发布后的单文件可执行文件，验证 WPF 主窗口创建、请求正常关闭并要求干净零退出。
 
-`rust/` 工作区是分阶段 Rust 重构：`intentroute-core` 移植确定性核心（与 C# 存储格式 JSON 兼容的规则模型、约束校验、规则身份、导入规划、规范运行顺序，以及带回环上游校验与密码脱敏的 sing-box 配置构建器），测试向量从 C# 测试套件移植；`intentroute-cli` 提供本地 `check` / `order` / `policy` / `import-preview` / `build-config` 子命令；`intentroute-gui`（阶段 3a+3b）是只读规则控制台——自动加载产品配置，提供规范顺序、过滤、排序、校验标记与详情面板；界面为中文，运行时加载系统 CJK 字体（无字体时回落英文，可用 `INTENTROUTE_GUI_LANG` 覆盖）。`./scripts/test-rust.ps1` 在 CI 中运行 `cargo test` 与发布构建；钉版真实 sing-box 门禁会同时校验 C# 与 Rust 两份构建产物；在 GUI 达到同等功能之前，WPF 应用仍是受支持的产品。
+`rust/` 工作区是分阶段 Rust 重构：`intentroute-core` 移植确定性核心（与 C# 存储格式 JSON 兼容的规则模型、约束校验、规则身份、导入规划、规范运行顺序，以及带回环上游校验与密码脱敏的 sing-box 配置构建器），测试向量从 C# 测试套件移植；`intentroute-cli` 提供本地 `check` / `order` / `policy` / `import-preview` / `build-config` 子命令；`intentroute-gui` 是与 WPF 共用核心的规则控制台：规范顺序、过滤、排序、校验标记、详情面板，全部有界编辑路径（启停/模式/约束/增删/上下移动/代理服务器/全局模式，均经管理锁事务），策略体检（身份重复、遮蔽、部分重叠、范围过宽）、路由推演、进程列表，以及运行日志监控——监控页只执行显式选定的 sing-box v1.13+ 可执行文件（探测版本、`check` 通过后才托管 `run`），托管期间持有与 WPF 相同的运行锁（双向互斥，期间配置编辑被拒），控制台输出按行脱敏进有界环形缓冲，停止/失败即删除含密码的生成配置；界面为中文，运行时加载系统 CJK 字体（无字体时回落英文，可用 `INTENTROUTE_GUI_LANG` 覆盖）。`./scripts/test-rust.ps1` 在 CI 中运行 `cargo test` 与发布构建；钉版真实 sing-box 门禁会同时校验 C# 与 Rust 两份构建产物；在 GUI 达到同等功能之前，WPF 应用仍是受支持的产品。
 
 `test-pinned-sing-box.ps1` 会临时下载官方 sing-box v1.13.19 Windows 压缩包、校验锁定的 SHA-256、把代表性 `SingBoxConfigBuilder` 输出送入真实 `sing-box check`，然后删除临时文件。这个仅测试用的依赖不会被复制进应用产物；IntentRoute AI 本身从不下载或捆绑 sing-box。
 
