@@ -162,6 +162,13 @@ struct UiStrings {
     global_direct: &'static str,
     global_proxy: &'static str,
     global_confirm_fmt: &'static str, // {mode}
+    // Process list (parity slice 8)
+    process_toggle: &'static str,
+    process_title: &'static str,
+    process_search_hint: &'static str,
+    process_add_rule: &'static str,
+    process_count_fmt: &'static str, // {count}
+    process_exists: &'static str,
 }
 
 const ZH: UiStrings = UiStrings {
@@ -274,6 +281,12 @@ const ZH: UiStrings = UiStrings {
     global_direct: "默认直连",
     global_proxy: "默认代理",
     global_confirm_fmt: "将全局模式切换为 {mode}？这影响所有未命中规则的流量走向。",
+    process_toggle: "进程列表",
+    process_title: "运行中的进程（点击「添加为规则」创建 Proxy 模式规则）",
+    process_search_hint: "进程名或 PID",
+    process_add_rule: "添加为规则",
+    process_count_fmt: "{count} 个进程",
+    process_exists: "同名进程已有完整身份相同的规则，拒绝添加。",
 };
 
 const EN: UiStrings = UiStrings {
@@ -386,6 +399,12 @@ const EN: UiStrings = UiStrings {
     global_direct: "default direct",
     global_proxy: "default proxy",
     global_confirm_fmt: "switch global mode to {mode}? This affects traffic that no rule matches.",
+    process_toggle: "processes",
+    process_title: "running processes (click \"add as rule\" to create a Proxy-mode rule)",
+    process_search_hint: "process name or PID",
+    process_add_rule: "add as rule",
+    process_count_fmt: "{count} processes",
+    process_exists: "a rule with the same full identity for this process already exists; refused.",
 };
 
 /// Constraint error names from the core are English; map to Chinese for the
@@ -538,6 +557,9 @@ struct ConsoleApp {
     sim_is_udp: bool,
     sim_result: Option<String>,
     sim_result_ok: bool,
+    process_open: bool,
+    process_search: String,
+    process_snapshot: Vec<intentroute_core::process::ProcessInfo>,
 }
 
 /// One confirmed edit intention; performed under the management lock.
@@ -640,6 +662,9 @@ impl ConsoleApp {
             sim_is_udp: false,
             sim_result: None,
             sim_result_ok: false,
+            process_open: false,
+            process_search: String::new(),
+            process_snapshot: Vec::new(),
         };
         if let Some(appdata) = std::env::var_os("APPDATA") {
             let default = PathBuf::from(appdata).join("IntentRouteAI").join("config.json");
@@ -1286,6 +1311,95 @@ impl eframe::App for ConsoleApp {
                 });
         }
 
+        // Process list panel (parity slice 8)
+        if self.process_open {
+            let mut refresh_requested = false;
+            egui::TopBottomPanel::bottom("processes")
+                .frame(
+                    egui::Frame::default()
+                        .fill(CARD)
+                        .stroke(egui::Stroke::new(1.0, BORDER))
+                        .inner_margin(egui::Margin::symmetric(10.0, 8.0)),
+                )
+                .default_height(240.0)
+                .show(ctx, |ui| {
+                    ui.horizontal(|ui| {
+                        ui.label(RichText::new(s.process_title).strong().color(ACCENT).small());
+                        ui.separator();
+                        ui.label(
+                            RichText::new(
+                                s.process_count_fmt
+                                    .replace("{count}", &self.process_snapshot.len().to_string()),
+                            )
+                            .color(MUTED)
+                            .small(),
+                        );
+                        ui.separator();
+                        egui::TextEdit::singleline(&mut self.process_search)
+                            .hint_text(s.process_search_hint)
+                            .desired_width(180.0)
+                            .show(ui);
+                        if ui.button(s.reload_short).clicked() {
+                            refresh_requested = true;
+                        }
+                    });
+                    ui.separator();
+                    let needle = self.process_search.trim().to_lowercase();
+                    let filtered: Vec<intentroute_core::process::ProcessInfo> = self
+                        .process_snapshot
+                        .iter()
+                        .filter(|p| {
+                            needle.is_empty()
+                                || p.name.to_lowercase().contains(&needle)
+                                || p.pid.to_string().contains(&needle)
+                        })
+                        .take(200)
+                        .cloned()
+                        .collect();
+                    egui::ScrollArea::vertical().show(ui, |ui| {
+                        for process in &filtered {
+                            ui.horizontal(|ui| {
+                                ui.label(
+                                    RichText::new(format!("{:>6}", process.pid))
+                                        .color(MUTED)
+                                        .small(),
+                                );
+                                ui.label(RichText::new(&process.name).strong());
+                                if !process.path.is_empty() {
+                                    ui.label(
+                                        RichText::new(process.path.trim())
+                                            .color(MUTED)
+                                            .small(),
+                                    );
+                                }
+                                ui.with_layout(
+                                    egui::Layout::right_to_left(egui::Align::Center),
+                                    |ui| {
+                                        if ui.button(s.process_add_rule).clicked() {
+                                            let edit = PendingEdit::AddRule {
+                                                exe_name: process.name.clone(),
+                                                mode: ProxyMode::Proxy,
+                                            };
+                                            self.perform_edit(&edit);
+                                        }
+                                    },
+                                );
+                            });
+                        }
+                        if filtered.len() > 200 {
+                            ui.label(
+                                RichText::new(format!("… {} more", filtered.len() - 200))
+                                    .color(MUTED)
+                                    .small(),
+                            );
+                        }
+                    });
+                });
+            if refresh_requested {
+                self.process_snapshot = intentroute_core::process::snapshot_processes();
+            }
+        }
+
         // Policy check panel (parity slice 5): KPI stats + basic findings,
         // all local using existing core modules.
         if self.policy_open {
@@ -1416,6 +1530,12 @@ impl eframe::App for ConsoleApp {
                 }
                 if ui.button(s.sim_toggle).clicked() {
                     self.sim_open = !self.sim_open;
+                }
+                if ui.button(s.process_toggle).clicked() {
+                    self.process_open = !self.process_open;
+                    if self.process_open && self.process_snapshot.is_empty() {
+                        self.process_snapshot = intentroute_core::process::snapshot_processes();
+                    }
                 }
                 // Global mode display + toggle (parity slice 7): showing the
                 // current persisted mode; clicking offers the other one behind

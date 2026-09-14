@@ -31,6 +31,7 @@ pub mod dpapi;
 pub mod identity;
 pub mod import_plan;
 pub mod local_endpoint;
+pub mod process;
 pub mod route_sim;
 pub mod runtime_lock;
 pub mod runtime_order;
